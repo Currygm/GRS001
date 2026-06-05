@@ -90,3 +90,28 @@ ary-storage/
 - 票据有效期为 90 秒。
 - Organizer 可以随时关闭下载权限，并立即撤销所有未使用票据。
 - Organizer Storage 保存票据状态；ARY 审计日志记录申请者、下载者、IP、申请时间、下载时间和结果。
+# ARY 长期赛事档案、结果与私人证书
+
+赛事结束后，Organizer 可以上传最终 PDF 海报、结构化排名和优秀作品摘要，并发布到 ARY 长期存储。每次发布产生独立版本，Visitor 只看到最新版本，ARY 管理端保留全部历史版本、授权哈希和审计记录。
+
+Organizer 还可以为已参加赛事的 Racer 上传私人证书 PDF。证书由 ARY 私有保存，仅对应 Racer 端口可列出和下载，Visitor、ARY 公共资产路径及其他角色均不能访问证书下载接口。
+
+```text
+ary-storage/
+  archives.json
+  certificates.json
+  public-archive/<raceId>/v<version>/poster.pdf
+  certificates/<raceId>/<racerId>/v<version>.pdf
+
+organizer-storage/races/<raceId>/
+  archive/poster.pdf
+```
+
+主要接口：
+
+- `POST /api/organizer/races/:raceId/archive-poster`
+- `POST /api/organizer/races/:raceId/archive`
+- `POST /api/organizer/races/:raceId/certificates/:racerId`
+- `GET /racer-certificates/:certificateId/download`
+
+归档和证书操作只允许在赛事结束后执行。安全证明允许并验证上述两类授权 PDF，同时继续拒绝 ARY Storage 中出现赛题、提交、临时分块或其他未授权 PDF。

@@ -18,20 +18,22 @@ const ORGANIZER = path.join(ROOT, "organizer-storage");
 const RACES = path.join(ORGANIZER, "races");
 const ARY = path.join(ROOT, "ary-storage");
 const ARCHIVE = path.join(ARY, "public-archive");
+const CERTIFICATES = path.join(ARY, "certificates");
 const SECRET = "ary-poc-local-secret";
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
 const RACER_ID = "racer-001";
 const ORGANIZER_ID = "organizer-001";
 const SERVER_TIME_ZONE = "Asia/Shanghai";
 
-for (const dir of [ORGANIZER, RACES, ARY, ARCHIVE]) fs.mkdirSync(dir, { recursive: true });
+for (const dir of [ORGANIZER, RACES, ARY, ARCHIVE, CERTIFICATES]) fs.mkdirSync(dir, { recursive: true });
 
 const files = {
   races: path.join(ARY, "races.json"),
   participations: path.join(ARY, "participations.json"),
   metadata: path.join(ARY, "metadata.json"),
   audit: path.join(ARY, "audit.json"),
-  archives: path.join(ARY, "archives.json")
+  archives: path.join(ARY, "archives.json"),
+  certificates: path.join(ARY, "certificates.json")
 };
 
 function writeJson(file, value) {
@@ -51,6 +53,7 @@ function init() {
   if (!fs.existsSync(files.metadata)) writeJson(files.metadata, {});
   if (!fs.existsSync(files.audit)) writeJson(files.audit, []);
   if (!fs.existsSync(files.archives)) writeJson(files.archives, []);
+  if (!fs.existsSync(files.certificates)) writeJson(files.certificates, []);
   migrateRaceTimes();
 }
 
@@ -82,7 +85,7 @@ function validateRaceTimes(startsAt, endsAt) {
   if (localDateKey(start) !== localDateKey(now)) {
     const error = new Error("start_must_be_today"); error.statusCode = 400; throw error;
   }
-  if (start.getTime() < now.getTime() - 30000) {
+  if (start.getTime() < now.getTime()) {
     const error = new Error("start_time_in_past"); error.statusCode = 400; throw error;
   }
   if (end.getTime() <= start.getTime()) {
@@ -115,7 +118,7 @@ function migrateRaceTimes() {
       changed = true;
     }
     const archive = archives.find(item => item.raceId === race.raceId);
-    if (archive && (!archive.startsAt || !archive.endsAt)) {
+    if (archive && !archive.versions && (!archive.startsAt || !archive.endsAt)) {
       archive.startsAt = race.startsAt;
       archive.endsAt = race.endsAt;
       archive.timeline = timelineText(race);
@@ -134,10 +137,31 @@ function racePaths(raceId) {
     datasets: path.join(root, "datasets"),
     dataset: path.join(root, "datasets", "challenge.pdf"),
     submissions: path.join(root, "submissions"),
+    archive: path.join(root, "archive"),
+    archivePoster: path.join(root, "archive", "poster.pdf"),
     manifest: path.join(root, "manifest.json"),
     policy: path.join(root, "download-policy.json"),
     tickets: path.join(root, "download-tickets.json")
   };
+}
+function sha256File(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
+function latestArchive(record) {
+  return record?.versions?.find(version => version.version === record.currentVersion) || record?.versions?.at(-1) || null;
+}
+function archiveRecord(raceId) { return readJson(files.archives, []).find(item => item.raceId === raceId) || null; }
+function validateArchiveInput(input) {
+  if (!Array.isArray(input.results) || input.results.length === 0) { const e = new Error("final_ranking_required"); e.statusCode = 400; throw e; }
+  const results = input.results.map(item => {
+    const rank = Number(item.rank), score = Number(item.score), racerId = String(item.racerId || "").trim();
+    if (!Number.isInteger(rank) || rank < 1 || !racerId || !Number.isFinite(score)) { const e = new Error("invalid_final_ranking"); e.statusCode = 400; throw e; }
+    return { rank, racerId, score, award: String(item.award || ""), comment: String(item.comment || "") };
+  });
+  const showcases = Array.isArray(input.showcases) ? input.showcases.map(item => {
+    const demoUrl = String(item.demoUrl || "").trim();
+    if (demoUrl) { try { new URL(demoUrl); } catch { const e = new Error("invalid_showcase_url"); e.statusCode = 400; throw e; } }
+    return { title: String(item.title || ""), summary: String(item.summary || ""), demoUrl };
+  }) : [];
+  return { results, showcases };
 }
 function getRace(raceId) { return readJson(files.races, []).find(race => race.raceId === raceId); }
 function requireRace(raceId) {
@@ -260,7 +284,14 @@ function proof() {
   const organizerFiles = listFiles(ORGANIZER);
   const aryFiles = listFiles(ARY);
   const metadata = Object.values(readJson(files.metadata, {}));
-  const forbidden = aryFiles.filter(file => /\.(pdf|part)$/i.test(file.path) || file.path.includes("datasets/") || file.path.includes("submissions/"));
+  const authorized = new Map();
+  for (const archive of readJson(files.archives, [])) for (const version of archive.versions || []) authorized.set(`public-archive/${archive.raceId}/v${version.version}/poster.pdf`, version.posterSha256);
+  for (const certificate of readJson(files.certificates, [])) authorized.set(`certificates/${certificate.raceId}/${certificate.racerId}/v${certificate.version}.pdf`, certificate.sha256);
+  const forbidden = aryFiles.filter(file => /\.part$/i.test(file.path) || file.path.includes("datasets/") || file.path.includes("submissions/") || (/\.pdf$/i.test(file.path) && !authorized.has(file.path)));
+  const longTermMismatches = [...authorized].filter(([relative, hash]) => {
+    const absolute = path.join(ARY, relative);
+    return !fs.existsSync(absolute) || sha256File(absolute) !== hash;
+  });
   const partials = organizerFiles.filter(file => file.path.toLowerCase().endsWith(".part"));
   const mismatches = metadata.filter(item => item.submissionHash).filter(item => {
     const expected = `races/${item.raceId}/submissions/${item.racerId}.pdf`;
@@ -268,10 +299,11 @@ function proof() {
     return !file || file.sha256 !== item.submissionHash.slice(0, 16);
   });
   return {
-    passed: forbidden.length === 0 && partials.length === 0 && mismatches.length === 0,
+    passed: forbidden.length === 0 && longTermMismatches.length === 0 && partials.length === 0 && mismatches.length === 0,
     checkedAt: new Date().toISOString(),
     claims: [
-      { name: "ARY 不持久化 PDF 或临时分块", passed: forbidden.length === 0, evidence: forbidden.length ? `发现异常文件：${forbidden.map(f => f.path).join(", ")}` : "ARY Storage 未发现 PDF、提交目录或 .part 文件" },
+      { name: "ARY 仅保存授权长期 PDF", passed: forbidden.length === 0, evidence: forbidden.length ? `发现未授权文件：${forbidden.map(f => f.path).join(", ")}` : `已允许 ${authorized.size} 个公开归档或私人证书 PDF` },
+      { name: "长期归档与证书哈希一致", passed: longTermMismatches.length === 0, evidence: longTermMismatches.length ? `不一致文件：${longTermMismatches.map(([file]) => file).join(", ")}` : `已验证 ${authorized.size} 个长期 PDF` },
       { name: "Organizer 无失败提交残留", passed: partials.length === 0, evidence: partials.length ? `发现临时文件：${partials.map(f => f.path).join(", ")}` : "所有赛事目录均无 .part 临时文件" },
       { name: "全部提交回执与 Organizer 文件一致", passed: mismatches.length === 0, evidence: mismatches.length ? `不匹配赛事：${mismatches.map(m => m.raceId).join(", ")}` : `已验证 ${metadata.filter(m => m.submissionHash).length} 个当前提交` }
     ],
@@ -287,14 +319,15 @@ function raceView(race) {
   const metadata = getMetadata(race.raceId);
   const manifest = readJson(paths.manifest, {});
   if (manifest.disclosure) manifest.disclosure.timeline = timelineText(race);
-  return { ...race, status: raceStatus(race), manifest, datasetUploaded: fs.existsSync(paths.dataset), participantCount: participants.length, metadata, downloadPolicy: readJson(paths.policy, { enabled: true }), tickets: readJson(paths.tickets, []).slice(-10).reverse(), archive: readJson(files.archives, []).find(a => a.raceId === race.raceId) || null };
+  const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId);
+  return { ...race, status: raceStatus(race), manifest, datasetUploaded: fs.existsSync(paths.dataset), archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, metadata, downloadPolicy: readJson(paths.policy, { enabled: true }), tickets: readJson(paths.tickets, []).slice(-10).reverse(), archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === RACER_ID).at(-1) || null };
 }
 function roleState(role) {
   const races = readJson(files.races, []).map(raceView);
   if (role === "ary") return { races, audits: readJson(files.audit, []).slice(0, 30), proof: proof() };
   if (role === "organizer") return { races };
-  if (role === "racer") return { races: races.map(race => ({ raceId: race.raceId, createdAt: race.createdAt, startsAt: race.startsAt, endsAt: race.endsAt, status: race.status, manifest: race.manifest, datasetUploaded: race.datasetUploaded, joined: isJoined(race.raceId), metadata: race.metadata })) };
-  return { archives: readJson(files.archives, []) };
+  if (role === "racer") return { races: races.map(race => ({ raceId: race.raceId, createdAt: race.createdAt, startsAt: race.startsAt, endsAt: race.endsAt, status: race.status, manifest: race.manifest, datasetUploaded: race.datasetUploaded, joined: isJoined(race.raceId), metadata: race.metadata })), certificates: readJson(files.certificates, []).filter(item => item.racerId === RACER_ID) };
+  return { archives: readJson(files.archives, []).map(latestArchive).filter(Boolean) };
 }
 
 const roleRules = {
@@ -304,9 +337,9 @@ const roleRules = {
   visitor: ["GET /api/state"]
 };
 function dynamicAllowed(role, method, p) {
-  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(dataset|disclosure|download-permission|review|archive|extend)$/.test(p) || /^\/organizer\/races\/[^/]+\/(poster\.svg|download)$/.test(p);
-  if (role === "racer") return /^\/api\/racer\/races\/[^/]+\/(join|download-url|submissions)$/.test(p);
-  if (role === "visitor") return /^\/archive-assets\/[^/]+\/poster\.svg$/.test(p);
+  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(dataset|disclosure|download-permission|review|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/(poster\.svg|download)$/.test(p);
+  if (role === "racer") return /^\/api\/racer\/races\/[^/]+\/(join|download-url|submissions)$/.test(p) || /^\/racer-certificates\/[^/]+\/download$/.test(p);
+  if (role === "visitor") return /^\/archive-assets\/[^/]+\/v\d+\/poster\.pdf$/.test(p);
   return false;
 }
 function serveStatic(res, pathname, role) {
@@ -322,7 +355,7 @@ function serveStatic(res, pathname, role) {
 function createRoleServer(role) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`), p = url.pathname, rule = `${req.method} ${p}`;
-    const protectedPath = p.startsWith("/api/") || p.startsWith("/organizer/races/") || p.startsWith("/archive-assets/");
+    const protectedPath = p.startsWith("/api/") || p.startsWith("/organizer/races/") || p.startsWith("/archive-assets/") || p.startsWith("/racer-certificates/");
     if (protectedPath && !roleRules[role].includes(rule) && !dynamicAllowed(role, req.method, p)) return json(res, 403, { error: "role_forbidden", role });
     try {
       if (req.method === "GET" && p === "/api/state") return json(res, 200, roleState(role));
@@ -430,19 +463,55 @@ function createRoleServer(role) {
       }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/archive$/);
       if (req.method === "POST" && match) {
-        const raceId = match[1], race = requireRace(raceId), manifest = readJson(racePaths(raceId).manifest, {}), metadata = getMetadata(raceId), archiveDir = path.join(ARCHIVE, raceId);
-        fs.mkdirSync(archiveDir, { recursive: true }); fs.writeFileSync(path.join(archiveDir, "poster.svg"), posterSvg(manifest.disclosure.title), "utf8");
-        const archive = { raceId, id: `archive-${raceId}`, title: manifest.disclosure.title, summary: manifest.disclosure.summary, startsAt: race.startsAt, endsAt: race.endsAt, timeline: timelineText(race), posterUrl: `/archive-assets/${raceId}/poster.svg`, rankingSummary: metadata.review ? `Organizer 评分：${metadata.review.score}` : "待评审", consent: { organizerId: race.organizerId, archiveVersion: manifest.version, consentHash: crypto.createHash("sha256").update(JSON.stringify(manifest.archiveFields)).digest("hex").slice(0, 20) }, publishedAt: new Date().toISOString() };
-        const archives = readJson(files.archives, []), index = archives.findIndex(a => a.raceId === raceId); index < 0 ? archives.push(archive) : archives[index] = archive; writeJson(files.archives, archives); audit("Organizer", "PUBLIC_ARCHIVE_PUBLISHED", raceId); return json(res, 200, { ok: true, archive });
+        const raceId = match[1], race = requireRace(raceId), paths = racePaths(raceId), manifest = readJson(paths.manifest, {});
+        if (raceStatus(race) !== "ended") return json(res, 409, { error: "race_not_ended" });
+        if (!fs.existsSync(paths.archivePoster)) return json(res, 409, { error: "archive_poster_required" });
+        const input = JSON.parse((await body(req)).toString("utf8") || "{}"), structured = validateArchiveInput(input);
+        const archives = readJson(files.archives, []), index = archives.findIndex(item => item.raceId === raceId);
+        const record = index < 0 ? { raceId, currentVersion: 0, versions: [] } : archives[index], version = record.currentVersion + 1;
+        const archiveDir = path.join(ARCHIVE, raceId, `v${version}`), poster = path.join(archiveDir, "poster.pdf");
+        fs.mkdirSync(archiveDir, { recursive: true }); fs.copyFileSync(paths.archivePoster, poster);
+        const publishedAt = new Date().toISOString(), consentHash = crypto.createHash("sha256").update(JSON.stringify({ raceId, version, organizerId: race.organizerId, ...structured })).digest("hex");
+        const snapshot = { raceId, version, title: manifest.disclosure.title, summary: manifest.disclosure.summary, startsAt: race.startsAt, endsAt: race.endsAt, timeline: timelineText(race), posterUrl: `/archive-assets/${raceId}/v${version}/poster.pdf`, posterSha256: sha256File(poster), results: structured.results, showcases: structured.showcases, organizerId: race.organizerId, publishedAt, consentHash };
+        record.currentVersion = version; record.versions.push(snapshot); index < 0 ? archives.push(record) : archives[index] = record; writeJson(files.archives, archives);
+        audit("Organizer", "PUBLIC_ARCHIVE_VERSION_PUBLISHED", raceId, { version, posterSha256: snapshot.posterSha256, consentHash }); return json(res, 200, { ok: true, archive: snapshot });
       }
-      match = p.match(/^\/archive-assets\/([^/]+)\/poster\.svg$/);
+      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/archive-poster$/);
+      if (req.method === "POST" && match) {
+        const raceId = match[1], race = requireRace(raceId), paths = racePaths(raceId); validatePdfRequest(req);
+        if (raceStatus(race) !== "ended") return json(res, 409, { error: "race_not_ended" });
+        const result = await receivePdf(req, path.join(paths.archive, ".poster.part"), paths.archivePoster);
+        audit("Organizer", "ARCHIVE_POSTER_STAGED", raceId, { sha256: result.hash, size: result.size }); return json(res, 200, { ok: true, sha256: result.hash, size: result.size });
+      }
+      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/certificates\/([^/]+)$/);
+      if (req.method === "POST" && match) {
+        const raceId = match[1], racerId = match[2], race = requireRace(raceId); validatePdfRequest(req);
+        if (raceStatus(race) !== "ended") return json(res, 409, { error: "race_not_ended" });
+        if (!isJoined(raceId, racerId)) return json(res, 409, { error: "race_participation_required" });
+        const certificates = readJson(files.certificates, []), previous = certificates.filter(item => item.raceId === raceId && item.racerId === racerId), version = previous.length + 1;
+        const dir = path.join(CERTIFICATES, raceId, racerId), final = path.join(dir, `v${version}.pdf`), result = await receivePdf(req, path.join(dir, `.v${version}.part`), final);
+        const certificateId = `certificate-${crypto.randomUUID()}`;
+        const certificate = { certificateId, raceId, racerId, version, sha256: result.hash, size: result.size, uploadedAt: new Date().toISOString(), downloadUrl: `/racer-certificates/${certificateId}/download` };
+        certificates.push(certificate); writeJson(files.certificates, certificates);
+        audit("Organizer", "PRIVATE_CERTIFICATE_UPLOADED", raceId, { racerId, version, sha256: result.hash }); return json(res, 200, { ok: true, certificate });
+      }
+      match = p.match(/^\/archive-assets\/([^/]+)\/v(\d+)\/poster\.pdf$/);
       if (req.method === "GET" && match) {
-        const poster = path.join(ARCHIVE, match[1], "poster.svg"); if (!fs.existsSync(poster)) return text(res, 404, "archive not published");
-        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=3600" }); return fs.createReadStream(poster).pipe(res);
+        const record = archiveRecord(match[1]), version = Number(match[2]);
+        if (!record?.versions?.some(item => item.version === version)) return text(res, 404, "archive not published");
+        const poster = path.join(ARCHIVE, match[1], `v${version}`, "poster.pdf");
+        res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": fs.statSync(poster).size, "Cache-Control": "public, max-age=3600" }); return fs.createReadStream(poster).pipe(res);
+      }
+      match = p.match(/^\/racer-certificates\/([^/]+)\/download$/);
+      if (req.method === "GET" && match) {
+        const certificate = readJson(files.certificates, []).find(item => item.certificateId === match[1]);
+        if (!certificate || certificate.racerId !== RACER_ID) return json(res, 404, { error: "certificate_not_found" });
+        const file = path.join(CERTIFICATES, certificate.raceId, certificate.racerId, `v${certificate.version}.pdf`);
+        res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": fs.statSync(file).size, "Content-Disposition": `attachment; filename="${certificate.raceId}-${certificate.racerId}-certificate-v${certificate.version}.pdf"` }); return fs.createReadStream(file).pipe(res);
       }
       if (req.method === "POST" && p === "/api/proof/run") { const result = proof(); audit("ARY", "SECURITY_PROOF_EXECUTED", "all-races", { passed: result.passed }); return json(res, 200, result); }
       if (req.method === "POST" && p === "/api/demo/reset") {
-        clearDir(RACES); clearDir(ARCHIVE); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); return json(res, 200, { ok: true });
+        clearDir(RACES); clearDir(ARCHIVE); clearDir(CERTIFICATES); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); writeJson(files.certificates, []); return json(res, 200, { ok: true });
       }
       if (serveStatic(res, p, role)) return;
       json(res, 404, { error: "not_found" });
