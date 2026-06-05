@@ -1,0 +1,80 @@
+[
+  {
+    "id": "98e4704a-1a7b-4f6b-a0db-1ee58f805693",
+    "at": "2026-06-05T11:07:47.501Z",
+    "actor": "Organizer",
+    "action": "PUBLIC_ARCHIVE_PUBLISHED",
+    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "detail": {}
+  },
+  {
+    "id": "02874218-1afd-4285-bbcb-77430ac599dd",
+    "at": "2026-06-05T11:07:24.996Z",
+    "actor": "Racer",
+    "action": "RACE_JOINED",
+    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "detail": {
+      "racerId": "racer-001"
+    }
+  },
+  {
+    "id": "0bb89f0d-a0cd-473b-94dc-752407b884ca",
+    "at": "2026-06-05T11:07:10.400Z",
+    "actor": "Organizer",
+    "action": "RACE_CREATED",
+    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "detail": {
+      "title": "666"
+    }
+  },
+  {
+    "id": "9b4038dd-f0a7-43b0-bfb7-df5b64c0c085",
+    "at": "2026-06-05T11:06:47.714Z",
+    "actor": "Organizer",
+    "action": "PUBLIC_ARCHIVE_PUBLISHED",
+    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "detail": {}
+  },
+  {
+    "id": "8391ddca-6ea2-48e3-b016-862a3a91d022",
+    "at": "2026-06-05T11:06:16.486Z",
+    "actor": "Racer",
+    "action": "RACE_JOINED",
+    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "detail": {
+      "racerId": "racer-001"
+    }
+  },
+  {
+    "id": "241108c4-23cc-487d-b874-182c569a1491",
+    "at": "2026-06-05T11:05:59.861Z",
+    "actor": "Organizer",
+    "action": "DATASET_UPLOADED",
+    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "detail": {
+      "fileName": "思想汇报规范.pdf",
+      "size": 2195097,
+      "sha256": "8a800961ced634417540bc5e9e63e03e6949af9d331072015ad5fdf231ed68a3"
+    }
+  },
+  {
+    "id": "9d85d001-9995-4122-89b5-5b3286be0dee",
+    "at": "2026-06-05T11:04:50.739Z",
+    "actor": "Organizer",
+    "action": "DISCLOSURE_UPDATED",
+    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "detail": {
+      "version": 2
+    }
+  },
+  {
+    "id": "ddedadaf-83f1-471b-bcb2-d370759a1e62",
+    "at": "2026-06-05T11:04:22.053Z",
+    "actor": "Organizer",
+    "action": "RACE_CREATED",
+    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "detail": {
+      "title": "agent开发"
+    }
+  }
+]

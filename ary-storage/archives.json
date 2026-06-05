@@ -1,0 +1,36 @@
+[
+  {
+    "raceId": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "id": "archive-race-81337311-95c7-40a9-ae27-826f2b679008",
+    "title": "agent开发",
+    "summary": "开发智能体",
+    "timeline": "2026/06/05 19:19 至 2026/06/06 19:19",
+    "posterUrl": "/archive-assets/race-81337311-95c7-40a9-ae27-826f2b679008/poster.svg",
+    "rankingSummary": "待评审",
+    "consent": {
+      "organizerId": "organizer-001",
+      "archiveVersion": 2,
+      "consentHash": "45bd9aaf85685724ba87"
+    },
+    "publishedAt": "2026-06-05T11:06:47.714Z",
+    "startsAt": "2026-06-05T11:19:44.215Z",
+    "endsAt": "2026-06-06T11:19:44.215Z"
+  },
+  {
+    "raceId": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "id": "archive-race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "title": "666",
+    "summary": "666",
+    "timeline": "2026/06/05 19:19 至 2026/06/06 19:19",
+    "posterUrl": "/archive-assets/race-60781e5f-b6b2-44ea-852e-996dceb540ad/poster.svg",
+    "rankingSummary": "待评审",
+    "consent": {
+      "organizerId": "organizer-001",
+      "archiveVersion": 1,
+      "consentHash": "45bd9aaf85685724ba87"
+    },
+    "publishedAt": "2026-06-05T11:07:47.500Z",
+    "startsAt": "2026-06-05T11:19:44.215Z",
+    "endsAt": "2026-06-06T11:19:44.215Z"
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "raceId": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "organizerId": "organizer-001",
+    "createdAt": "2026-06-05T11:04:22.051Z",
+    "startsAt": "2026-06-05T11:19:44.215Z",
+    "endsAt": "2026-06-06T11:19:44.215Z"
+  },
+  {
+    "raceId": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "organizerId": "organizer-001",
+    "createdAt": "2026-06-05T11:07:10.399Z",
+    "startsAt": "2026-06-05T11:19:44.215Z",
+    "endsAt": "2026-06-06T11:19:44.215Z"
+  }
+]
