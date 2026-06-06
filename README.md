@@ -84,10 +84,12 @@ ary-storage/
 - Organizer 或本地计分程序直接原子更新 `live-ranking.json`，Demo UI 展示同步状态、排序结果；Racer 工作台会显示公开排名和当前 Racer 的名次。
 - 本地文件字段为 `raceId`、递增 `version`、`updatedAt` 和 `scores`；每条分数只包含 `racerId` 与 `score`。
 - Organizer 创建赛事时会自动生成一个带真实 `raceId` 的空 `live-ranking.json` 模板；本地计分程序只需要更新 `version`、`updatedAt` 和 `scores`。
-- ARY 监听 Organizer 文件变化，校验后仅在内存中缓存分数投影并计算排名，通过 SSE `/api/live-rankings/events` 推送至 ARY、Racer 与 Visitor。
+- ARY 同时使用文件监听和轻量轮询扫描 `live-ranking.json` 的修改时间、大小和哈希变化，校验后仅在内存中缓存分数投影并计算排名，通过 SSE `/api/live-rankings/events` 推送至 ARY、Racer 与 Visitor。
 - ARY 按 `score` 降序排序，分数相同时按 `racerId` 字典序稳定排序。
 - 只有状态为 `open` 且披露开关开启的赛事会公开实时排名；赛事结束或撤回披露后自动停止展示。
-- 新投影版本必须严格递增；相同版本但内容变化、较低版本、未知字段、重复 Racer、缺失 Racer ID、超过 1000 行或大于 1 MiB 的投影都会被拒绝。文件无效时继续展示上一有效内存版本并标记为过期。ARY 仅持久化同步元数据、哈希和审计记录。
+- 披露关闭时，ARY 会清空当前内存投影和版本校验基线，只保留不可用的同步元信息；关闭期间本地文件变化不会读取 `scores` 正文，也不会把同版本修改标记为同步异常。
+- 重新公开披露时，ARY 主动读取当前 `live-ranking.json` 并把它作为新的有效基线；版本号不由 ARY 自动递增或重置，而是直接采用文件内的 `version`。
+- 在披露开启且已有有效基线期间，新投影版本必须严格递增；相同版本但内容变化、较低版本、未知字段、重复 Racer、缺失 Racer ID、超过 1000 行或大于 1 MiB 的投影都会被拒绝。文件无效时继续展示上一有效内存版本并标记为过期。ARY 仅持久化同步元数据、哈希和审计记录。
 
 ## ARY 强制结束比赛
 

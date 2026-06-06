@@ -43,6 +43,7 @@ const files = {
 const liveRankingCache = new Map();
 const liveRankingClients = new Set();
 const rankingDebounce = new Map();
+const rankingFileStats = new Map();
 let rankingWatcher;
 
 function writeJson(file, value) {
@@ -253,6 +254,18 @@ function publicLiveRankings() {
 function liveRankingView(ranking) {
   return ranking ? { raceId: ranking.raceId, version: ranking.version, updatedAt: ranking.updatedAt, sha256: ranking.sha256, stale: Boolean(ranking.stale), frozen: Boolean(ranking.frozen), rows: ranking.rows } : null;
 }
+function isLiveRankingDisclosureEnabled(raceId) {
+  const manifest = readJson(racePaths(raceId).manifest, {});
+  return Boolean(manifest.disclosure?.liveRankingVisible);
+}
+function clearLiveRankingProjection(raceId) {
+  clearTimeout(rankingDebounce.get(raceId));
+  rankingDebounce.delete(raceId);
+  rankingFileStats.set(raceId, rankingFileSignature(raceId));
+  const hadRanking = liveRankingCache.delete(raceId);
+  writeLiveRankingMeta(raceId, { raceId, available: false, stale: false, syncedAt: new Date().toISOString() });
+  if (hadRanking) broadcastLiveRankings();
+}
 function sendSse(res, event, value) { res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); }
 function broadcastLiveRankings() {
   const snapshot = publicLiveRankings();
@@ -271,8 +284,13 @@ function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED", options = {}) {
     }
     return;
   }
+  if (!options.allowHidden && !isLiveRankingDisclosureEnabled(raceId)) {
+    clearLiveRankingProjection(raceId);
+    return;
+  }
   const file = racePaths(raceId).liveRanking;
   if (!fs.existsSync(file)) {
+    rankingFileStats.set(raceId, "missing");
     if (liveRankingCache.delete(raceId)) {
       writeLiveRankingMeta(raceId, { raceId, available: false, stale: false, syncedAt: new Date().toISOString() });
       audit("ARY", "LIVE_RANKING_REMOVED", raceId);
@@ -281,9 +299,10 @@ function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED", options = {}) {
     return;
   }
   try {
+    rankingFileStats.set(raceId, rankingFileSignature(raceId));
     if (fs.statSync(file).size > MAX_RANKING_FILE_SIZE) throw new Error("live_ranking_file_too_large");
     const raw = fs.readFileSync(file, "utf8"), parsed = validateLiveRanking(JSON.parse(raw.replace(/^\uFEFF/, "")), raceId), previous = liveRankingCache.get(raceId), previousMeta = readJson(files.liveRankingMeta, {})[raceId];
-    const currentVersion = previous?.version || previousMeta?.version || 0;
+    const currentVersion = options.resetVersionBaseline ? 0 : (previous?.version || previousMeta?.version || 0);
     const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
     if (parsed.version < currentVersion) {
       if (previous) liveRankingCache.set(raceId, { ...previous, stale: true });
@@ -331,6 +350,41 @@ function scanLiveRankings() {
   if (!fs.existsSync(RACES)) return;
   for (const raceId of fs.readdirSync(RACES)) if (fs.statSync(path.join(RACES, raceId)).isDirectory()) loadLiveRanking(raceId, "LIVE_RANKING_LOADED");
 }
+function rankingFileSignature(raceId) {
+  const file = racePaths(raceId).liveRanking;
+  try {
+    const stats = fs.statSync(file);
+    return stats.isFile() ? `${stats.mtimeMs}:${stats.size}` : "missing";
+  } catch {
+    return "missing";
+  }
+}
+function scanLiveRankingChanges() {
+  if (!fs.existsSync(RACES)) return;
+  const seen = new Set();
+  for (const raceId of fs.readdirSync(RACES)) {
+    const root = path.join(RACES, raceId);
+    let isRaceDirectory = false;
+    try {
+      isRaceDirectory = fs.statSync(root).isDirectory();
+    } catch {
+      continue;
+    }
+    if (!isRaceDirectory) continue;
+    seen.add(raceId);
+    const signature = rankingFileSignature(raceId), previous = rankingFileStats.get(raceId);
+    if (signature !== previous) {
+      rankingFileStats.set(raceId, signature);
+      scheduleRankingLoad(raceId);
+    }
+  }
+  for (const raceId of [...rankingFileStats.keys()]) {
+    if (!seen.has(raceId)) {
+      rankingFileStats.delete(raceId);
+      if (liveRankingCache.delete(raceId)) broadcastLiveRankings();
+    }
+  }
+}
 function scheduleRankingLoad(raceId) {
   const race = getRace(raceId);
   if (race && raceStatus(race) === "ended") return;
@@ -340,8 +394,11 @@ function scheduleRankingLoad(raceId) {
 function watchLiveRankings() {
   rankingWatcher?.close();
   rankingWatcher = fs.watch(RACES, { recursive: true }, (event, relative) => {
-    if (!relative || path.basename(relative) !== "live-ranking.json") return;
-    scheduleRankingLoad(String(relative).split(/[\\/]/)[0]);
+    if (!relative) return;
+    const parts = String(relative).split(/[\\/]/);
+    const fileName = path.basename(relative);
+    if (fileName !== "live-ranking.json" && fileName !== "live-ranking.json.part" && parts.length < 2) return;
+    scheduleRankingLoad(parts[0]);
   });
 }
 function sha256File(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
@@ -801,8 +858,17 @@ function createRoleServer(role) {
           title: String(input.title || item.title).trim(),
           summary: String(input.summary ?? item.summary)
         }));
-        const manifest = readJson(paths.manifest, {}); manifest.version += 1; manifest.disclosure = { ...manifest.disclosure, posterVisible: Boolean(input.posterVisible), liveRankingVisible: Boolean(input.liveRankingVisible) };
-        writeJson(paths.manifest, manifest); audit("Organizer", "DISCLOSURE_UPDATED", raceId, { version: manifest.version, liveRankingVisible: manifest.disclosure.liveRankingVisible }); broadcastLiveRankings(); return json(res, 200, { ok: true, manifest });
+        const manifest = readJson(paths.manifest, {});
+        const previousLiveRankingVisible = Boolean(manifest.disclosure?.liveRankingVisible);
+        const nextLiveRankingVisible = Boolean(input.liveRankingVisible);
+        manifest.version += 1;
+        manifest.disclosure = { ...manifest.disclosure, posterVisible: Boolean(input.posterVisible), liveRankingVisible: nextLiveRankingVisible };
+        writeJson(paths.manifest, manifest);
+        audit("Organizer", "DISCLOSURE_UPDATED", raceId, { version: manifest.version, liveRankingVisible: manifest.disclosure.liveRankingVisible });
+        if (!nextLiveRankingVisible) clearLiveRankingProjection(raceId);
+        else loadLiveRanking(raceId, previousLiveRankingVisible ? "LIVE_RANKING_DISCLOSURE_REFRESHED" : "LIVE_RANKING_DISCLOSURE_ENABLED", { resetVersionBaseline: !previousLiveRankingVisible || Boolean(liveRankingCache.get(raceId)?.stale) });
+        broadcastLiveRankings();
+        return json(res, 200, { ok: true, manifest });
       }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/extend$/);
       if (req.method === "POST" && match) {
@@ -900,7 +966,7 @@ function createRoleServer(role) {
       }
       if (req.method === "POST" && p === "/api/proof/run") { const result = proof(); audit("ARY", "SECURITY_PROOF_EXECUTED", "all-races", { passed: result.passed }); return json(res, 200, result); }
       if (req.method === "POST" && p === "/api/demo/reset") {
-        clearDir(RACES); clearDir(ARCHIVE); clearDir(CERTIFICATES); liveRankingCache.clear(); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); writeJson(files.certificates, []); writeJson(files.challenges, {}); writeJson(files.liveRankingMeta, {}); broadcastLiveRankings(); return json(res, 200, { ok: true });
+        clearDir(RACES); clearDir(ARCHIVE); clearDir(CERTIFICATES); liveRankingCache.clear(); rankingFileStats.clear(); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); writeJson(files.certificates, []); writeJson(files.challenges, {}); writeJson(files.liveRankingMeta, {}); broadcastLiveRankings(); return json(res, 200, { ok: true });
       }
       if (serveStatic(res, p, role)) return;
       json(res, 404, { error: "not_found" });
@@ -915,3 +981,4 @@ setInterval(() => {
   }
   broadcastLiveRankings();
 }, 3000);
+setInterval(scanLiveRankingChanges, 1500);
