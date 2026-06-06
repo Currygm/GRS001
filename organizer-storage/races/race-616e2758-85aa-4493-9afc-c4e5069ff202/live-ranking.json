@@ -1,0 +1,10 @@
+{
+  "raceId": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+  "version": 1,
+  "updatedAt": "2026-06-06T09:29:15.406Z",
+    "scores": [
+    { "racerId": "racer-001", "score": 98.5 },
+    {"racerId": "racer-002", "score": 98},
+    {"racerId": "racer-003", "score": 97}
+  ]
+}

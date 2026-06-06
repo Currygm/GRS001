@@ -13,10 +13,60 @@ async function uploadPdf(url, inputId) {
   if (!response.ok) throw new Error(result.error);
   return result;
 }
+async function uploadZip(url, inputId) {
+  const f = $(inputId).files[0];
+  if (!f) throw new Error("请选择 ZIP");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip", "X-File-Name": encodeURIComponent(f.name), "X-File-Size": String(f.size) },
+    body: f
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  return result;
+}
 
 function rankingRowsHtml(ranking) {
   if (!ranking?.rows?.length) return `<div class="empty">暂无有效分数投影</div>`;
   return ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))}</div></div>`).join("");
+}
+
+function collectArchiveResults() {
+  const results = [];
+  for (let rank = 1; rank <= 10; rank++) {
+    const racerId = $(`archiveRacer${rank}`).value.trim();
+    const scoreText = $(`archiveScore${rank}`).value.trim();
+    if (!racerId && !scoreText) continue;
+    if (!racerId || !scoreText) throw new Error(`请补全第 ${rank} 名的 Racer ID 和分数`);
+    results.push({ rank, racerId, score: Number(scoreText) });
+  }
+  if (!results.length) throw new Error("请至少填写一条最终排名");
+  return results;
+}
+
+function updateShowcaseFields(results = collectArchiveResultsSafe()) {
+  for (let index = 1; index <= 3; index++) {
+    const row = results[index - 1];
+    const label = $(`showcaseRacer${index}`);
+    if (label) label.textContent = row ? `第 ${row.rank} 名 · ${row.racerId} · ${row.score}` : `第 ${index} 名 · 请先填写最终排名`;
+  }
+}
+
+function collectArchiveResultsSafe() {
+  try { return collectArchiveResults(); } catch { return []; }
+}
+
+function collectTopShowcases(results) {
+  return results.slice(0, 3).map((row, index) => {
+    const n = index + 1;
+    return {
+      rank: row.rank,
+      racerId: row.racerId,
+      title: $(`showcaseTitle${n}`).value,
+      summary: $(`showcaseSummary${n}`).value,
+      demoUrl: $(`showcaseUrl${n}`).value
+    };
+  });
 }
 
 function render() {
@@ -47,7 +97,8 @@ function render() {
   $("livePreview").innerHTML = `<div class="preview-card">${m.posterVisible ? `<img src="/organizer/races/${r.raceId}/poster.svg?v=${r.manifest.version}">` : `<div class="empty">海报已撤回</div>`}<div><span class="eyebrow">${statusLabel(r.status)} · V${r.manifest.version}</span><h2>${escapeHtml(m.title)}</h2><p>${escapeHtml(m.summary)}</p><p>${escapeHtml(m.timeline)}</p><p>实时排名：${m.liveRankingVisible && r.status === "open" ? "公开" : "不公开"}</p>${m.liveRankingVisible && r.status === "open" ? rankingRowsHtml(r.liveRanking) : ""}</div></div>`;
   $("longTermArchive").classList.toggle("hidden", r.status !== "ended");
   const current = r.archive?.versions?.find(v => v.version === r.archive.currentVersion);
-  $("archiveStatus").textContent = `最终海报：${r.archivePosterUploaded ? "已暂存" : "未上传"} · 当前公开版本：${current ? `v${current.version}` : "未发布"} · 私人证书版本：${r.racerCertificate ? `v${r.racerCertificate.version}` : "未上传"}`;
+  $("archiveStatus").textContent = `最终海报：${r.archivePosterUploaded ? "已暂存" : "未上传"} · 当前公开版本：${current ? `v${current.version}` : "未发布"} · 私人证书：${r.certificateCount}`;
+  updateShowcaseFields();
 }
 
 async function refresh(id = selectedRaceId) {
@@ -66,13 +117,22 @@ $("saveDisclosure").onclick = async () => { await api(`/api/organizer/races/${se
 $("extendRace").onclick = async () => { await api(`/api/organizer/races/${selectedRaceId}/extend`, { method: "POST", body: JSON.stringify({ endsAt: new Date($("extendEndsAt").value).toISOString() }) }); toast("赛事结束时间已延长"); await refresh(); };
 $("saveChallenge").onclick = async () => { const x = await api(`/api/organizer/races/${selectedRaceId}/challenge`, { method: "PUT", body: JSON.stringify({ title: $("challengeTitle").value, description: $("challengeDescription").value, submissionRequirements: $("challengeSubmissionRequirements").value, evaluationCriteria: $("challengeEvaluationCriteria").value, notes: $("challengeNotes").value }) }); toast(`结构化赛题 v${x.challenge.version} 已保存至 ARY`); await refresh(); };
 $("uploadArchivePoster").onclick = async () => { const x = await uploadPdf(`/api/organizer/races/${selectedRaceId}/archive-poster`, "archivePosterFile"); $("archivePosterResult").textContent = `大小：${x.size} B\nSHA256：${x.sha256}`; toast("最终海报已暂存"); await refresh(); };
-$("uploadCertificate").onclick = async () => { const x = await uploadPdf(`/api/organizer/races/${selectedRaceId}/certificates/racer-001`, "certificateFile"); $("certificateResult").textContent = `证书版本：v${x.certificate.version}\nSHA256：${x.certificate.sha256}`; toast("私人证书已保存至 ARY"); await refresh(); };
+$("uploadCertificatesZip").onclick = async () => {
+  const x = await uploadZip(`/api/organizer/races/${selectedRaceId}/certificates-bulk`, "certificatesZipFile");
+  $("certificateResult").textContent = x.certificates.map(c => `${c.racerId} · v${c.version} · ${c.sha256}`).join("\n");
+  toast(`已上传 ${x.certificates.length} 份私人证书`);
+  await refresh();
+};
 $("publishArchive").onclick = async () => {
-  const showcase = { title: $("showcaseTitle").value, summary: $("showcaseSummary").value, demoUrl: $("showcaseUrl").value };
-  const x = await api(`/api/organizer/races/${selectedRaceId}/archive`, { method: "POST", body: JSON.stringify({ results: [{ rank: $("resultRank").value, racerId: $("resultRacerId").value, score: $("resultScore").value, award: $("resultAward").value, comment: $("resultComment").value }], showcases: showcase.title || showcase.summary || showcase.demoUrl ? [showcase] : [] }) });
+  const results = collectArchiveResults();
+  const x = await api(`/api/organizer/races/${selectedRaceId}/archive`, { method: "POST", body: JSON.stringify({ results, showcases: collectTopShowcases(results) }) });
   toast(`长期归档 v${x.archive.version} 已发布`);
   await refresh();
 };
+for (let rank = 1; rank <= 10; rank++) {
+  $(`archiveRacer${rank}`).addEventListener("input", () => updateShowcaseFields());
+  $(`archiveScore${rank}`).addEventListener("input", () => updateShowcaseFields());
+}
 const now = new Date(), endToday = new Date(now);
 endToday.setHours(23, 59, 0, 0);
 $("createStartsAt").min = toLocalInput(now);

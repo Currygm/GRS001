@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const zlib = require("zlib");
 const { Transform } = require("stream");
 const { pipeline } = require("stream/promises");
 
@@ -20,7 +21,8 @@ const ARY = path.join(ROOT, "ary-storage");
 const ARCHIVE = path.join(ARY, "public-archive");
 const CERTIFICATES = path.join(ARY, "certificates");
 const MAX_FILE_SIZE = 16 * 1024 * 1024;
-const RACER_ID = "racer-001";
+const MAX_ZIP_SIZE = 64 * 1024 * 1024;
+const DEFAULT_RACER_ID = "racer-001";
 const ORGANIZER_ID = "organizer-001";
 const SERVER_TIME_ZONE = "Asia/Shanghai";
 
@@ -54,6 +56,16 @@ function writeJsonAtomic(file, value) {
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch { return fallback; }
 }
+function normalizeRacerId(value) {
+  const racerId = String(value || DEFAULT_RACER_ID).trim();
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(racerId)) {
+    const error = new Error("invalid_racer_id"); error.statusCode = 400; throw error;
+  }
+  return racerId;
+}
+function racerIdFromRequest(req, url) {
+  return normalizeRacerId(req.headers["x-racer-id"] || url.searchParams.get("racer") || url.searchParams.get("racerId"));
+}
 function clearDir(dir) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir)) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
@@ -82,6 +94,7 @@ function localDateKey(date) {
   }).format(date);
 }
 function raceStatus(race, now = Date.now()) {
+  if (race.forceFinishedAt) return "ended";
   if (now < new Date(race.startsAt).getTime()) return "scheduled";
   if (now >= new Date(race.endsAt).getTime()) return "ended";
   return "open";
@@ -157,6 +170,14 @@ function racePaths(raceId) {
     manifest: path.join(root, "manifest.json")
   };
 }
+function writeLiveRankingTemplate(race) {
+  writeJsonAtomic(racePaths(race.raceId).liveRanking, {
+    raceId: race.raceId,
+    version: 1,
+    updatedAt: race.createdAt,
+    scores: []
+  });
+}
 function removeLegacyDownloadData() {
   if (!fs.existsSync(RACES)) return;
   for (const raceId of fs.readdirSync(RACES)) {
@@ -201,7 +222,7 @@ function publicLiveRankings() {
   });
 }
 function liveRankingView(ranking) {
-  return ranking ? { raceId: ranking.raceId, version: ranking.version, updatedAt: ranking.updatedAt, sha256: ranking.sha256, stale: Boolean(ranking.stale), rows: ranking.rows } : null;
+  return ranking ? { raceId: ranking.raceId, version: ranking.version, updatedAt: ranking.updatedAt, sha256: ranking.sha256, stale: Boolean(ranking.stale), frozen: Boolean(ranking.frozen), rows: ranking.rows } : null;
 }
 function sendSse(res, event, value) { res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); }
 function broadcastLiveRankings() {
@@ -210,7 +231,17 @@ function broadcastLiveRankings() {
     try { sendSse(client, "rankings", snapshot); } catch { liveRankingClients.delete(client); }
   }
 }
-function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED") {
+function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED", options = {}) {
+  const race = getRace(raceId);
+  if (!options.allowFinished && race && raceStatus(race) === "ended") {
+    const cached = liveRankingCache.get(raceId);
+    if (cached && !cached.frozen) {
+      liveRankingCache.set(raceId, { ...cached, frozen: true });
+      writeLiveRankingMeta(raceId, { raceId, available: true, version: cached.version, sha256: cached.sha256, updatedAt: cached.updatedAt, syncedAt: new Date().toISOString(), stale: Boolean(cached.stale), frozen: true, stoppedAt: new Date().toISOString() });
+      broadcastLiveRankings();
+    }
+    return;
+  }
   const file = racePaths(raceId).liveRanking;
   if (!fs.existsSync(file)) {
     if (liveRankingCache.delete(raceId)) {
@@ -235,7 +266,7 @@ function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED") {
     if (previous?.sha256 === sha256 && !previous.stale) return;
     const cached = { ...parsed, sha256, stale: false };
     liveRankingCache.set(raceId, cached);
-    writeLiveRankingMeta(raceId, { raceId, available: true, version: cached.version, sha256, updatedAt: cached.updatedAt, syncedAt: new Date().toISOString(), stale: false });
+    writeLiveRankingMeta(raceId, { raceId, available: true, version: cached.version, sha256, updatedAt: cached.updatedAt, syncedAt: new Date().toISOString(), stale: false, frozen: false });
     audit("ARY", action, raceId, { version: cached.version, sha256 }); broadcastLiveRankings();
   } catch (error) {
     const previous = liveRankingCache.get(raceId);
@@ -244,11 +275,27 @@ function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED") {
     audit("ARY", "LIVE_RANKING_SYNC_FAILED", raceId, { error: error.message }); broadcastLiveRankings();
   }
 }
+function freezeLiveRanking(raceId) {
+  loadLiveRanking(raceId, "LIVE_RANKING_SYNCED_BEFORE_FORCE_FINISH", { allowFinished: true });
+  const cached = liveRankingCache.get(raceId);
+  const now = new Date().toISOString();
+  if (cached) {
+    const frozen = { ...cached, stale: false, frozen: true };
+    liveRankingCache.set(raceId, frozen);
+    writeLiveRankingMeta(raceId, { raceId, available: true, version: frozen.version, sha256: frozen.sha256, updatedAt: frozen.updatedAt, syncedAt: now, stale: false, frozen: true, stoppedAt: now });
+  } else {
+    const previousMeta = readJson(files.liveRankingMeta, {})[raceId] || {};
+    writeLiveRankingMeta(raceId, { raceId, available: false, version: previousMeta.version || null, sha256: previousMeta.sha256 || null, updatedAt: previousMeta.updatedAt || null, syncedAt: now, stale: Boolean(previousMeta.stale), frozen: true, stoppedAt: now, error: previousMeta.error || "no_valid_live_ranking_to_freeze" });
+  }
+  return cached || null;
+}
 function scanLiveRankings() {
   if (!fs.existsSync(RACES)) return;
   for (const raceId of fs.readdirSync(RACES)) if (fs.statSync(path.join(RACES, raceId)).isDirectory()) loadLiveRanking(raceId, "LIVE_RANKING_LOADED");
 }
 function scheduleRankingLoad(raceId) {
+  const race = getRace(raceId);
+  if (race && raceStatus(race) === "ended") return;
   clearTimeout(rankingDebounce.get(raceId));
   rankingDebounce.set(raceId, setTimeout(() => { rankingDebounce.delete(raceId); loadLiveRanking(raceId); }, 80));
 }
@@ -266,16 +313,28 @@ function latestArchive(record) {
 function archiveRecord(raceId) { return readJson(files.archives, []).find(item => item.raceId === raceId) || null; }
 function validateArchiveInput(input) {
   if (!Array.isArray(input.results) || input.results.length === 0) { const e = new Error("final_ranking_required"); e.statusCode = 400; throw e; }
+  if (input.results.length > 10) { const e = new Error("final_ranking_top_10_only"); e.statusCode = 400; throw e; }
   const results = input.results.map(item => {
-    const rank = Number(item.rank), score = Number(item.score), racerId = String(item.racerId || "").trim();
-    if (!Number.isInteger(rank) || rank < 1 || !racerId || !Number.isFinite(score)) { const e = new Error("invalid_final_ranking"); e.statusCode = 400; throw e; }
-    return { rank, racerId, score, award: String(item.award || ""), comment: String(item.comment || "") };
-  });
-  const showcases = Array.isArray(input.showcases) ? input.showcases.map(item => {
+    const rank = Number(item.rank), score = Number(item.score), racerId = normalizeRacerId(item.racerId);
+    if (!Number.isInteger(rank) || rank < 1 || rank > 10 || !Number.isFinite(score)) { const e = new Error("invalid_final_ranking"); e.statusCode = 400; throw e; }
+    return { rank, racerId, score };
+  }).sort((a, b) => a.rank - b.rank);
+  if (new Set(results.map(item => item.rank)).size !== results.length) { const e = new Error("duplicate_final_ranking_rank"); e.statusCode = 400; throw e; }
+  if (new Set(results.map(item => item.racerId)).size !== results.length) { const e = new Error("duplicate_final_ranking_racer"); e.statusCode = 400; throw e; }
+  const rawShowcases = Array.isArray(input.showcases) ? input.showcases.slice(0, 3) : [];
+  const showcases = results.slice(0, 3).map((row, index) => {
+    const item = rawShowcases[index] || {};
     const demoUrl = String(item.demoUrl || "").trim();
     if (demoUrl) { try { new URL(demoUrl); } catch { const e = new Error("invalid_showcase_url"); e.statusCode = 400; throw e; } }
-    return { title: String(item.title || ""), summary: String(item.summary || ""), demoUrl };
-  }) : [];
+    return {
+      rank: row.rank,
+      racerId: row.racerId,
+      score: row.score,
+      title: String(item.title || ""),
+      summary: String(item.summary || ""),
+      demoUrl
+    };
+  }).filter(item => item.title.trim() || item.summary.trim() || item.demoUrl);
   return { results, showcases };
 }
 function getRace(raceId) { return readJson(files.races, []).find(race => race.raceId === raceId); }
@@ -292,18 +351,18 @@ function updateRace(raceId, updater) {
   writeJson(files.races, races);
   return races[index];
 }
-function metadataKey(raceId, racerId = RACER_ID) { return `${raceId}:${racerId}`; }
-function getMetadata(raceId, racerId = RACER_ID) {
+function metadataKey(raceId, racerId = DEFAULT_RACER_ID) { return `${raceId}:${racerId}`; }
+function getMetadata(raceId, racerId = DEFAULT_RACER_ID) {
   return readJson(files.metadata, {})[metadataKey(raceId, racerId)] || {
     raceId, racerId, submissionStatus: "not_submitted", receiptId: null
   };
 }
-function setMetadata(raceId, value, racerId = RACER_ID) {
+function setMetadata(raceId, value, racerId = DEFAULT_RACER_ID) {
   const all = readJson(files.metadata, {});
   all[metadataKey(raceId, racerId)] = value;
   writeJson(files.metadata, all);
 }
-function isJoined(raceId, racerId = RACER_ID) {
+function isJoined(raceId, racerId = DEFAULT_RACER_ID) {
   return readJson(files.participations, []).some(item => item.raceId === raceId && item.racerId === racerId);
 }
 function audit(actor, action, target, detail = {}) {
@@ -369,6 +428,68 @@ function validatePdfRequest(req) {
   if (declaredSize > MAX_FILE_SIZE) { const e = new Error("pdf_too_large"); e.statusCode = 413; throw e; }
   return { contentType, fileName, declaredSize };
 }
+function validateZipRequest(req) {
+  const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const fileName = path.basename(decodeURIComponent(String(req.headers["x-file-name"] || "certificates.zip")));
+  const declaredSize = Math.max(Number(req.headers["content-length"] || 0), Number(req.headers["x-file-size"] || 0));
+  if (!["application/zip", "application/x-zip-compressed", "application/octet-stream"].includes(contentType) || !fileName.toLowerCase().endsWith(".zip")) { const e = new Error("zip_required"); e.statusCode = 415; throw e; }
+  if (!Number.isFinite(declaredSize) || declaredSize < 0) { const e = new Error("invalid_file_size"); e.statusCode = 400; throw e; }
+  if (declaredSize > MAX_ZIP_SIZE) { const e = new Error("zip_too_large"); e.statusCode = 413; throw e; }
+  return { contentType, fileName, declaredSize };
+}
+function parseCertificateZip(buffer) {
+  const eocdMin = 22, maxComment = 0xffff, start = Math.max(0, buffer.length - eocdMin - maxComment);
+  let eocd = -1;
+  for (let i = buffer.length - eocdMin; i >= start; i--) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) { const e = new Error("invalid_zip"); e.statusCode = 400; throw e; }
+  const entries = buffer.readUInt16LE(eocd + 10), centralOffset = buffer.readUInt32LE(eocd + 16);
+  const certificates = [];
+  const seen = new Set();
+  let offset = centralOffset;
+  for (let index = 0; index < entries; index++) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) { const e = new Error("invalid_zip"); e.statusCode = 400; throw e; }
+    const method = buffer.readUInt16LE(offset + 10), compressedSize = buffer.readUInt32LE(offset + 20), uncompressedSize = buffer.readUInt32LE(offset + 24);
+    const nameLength = buffer.readUInt16LE(offset + 28), extraLength = buffer.readUInt16LE(offset + 30), commentLength = buffer.readUInt16LE(offset + 32), localOffset = buffer.readUInt32LE(offset + 42);
+    const entryName = buffer.subarray(offset + 46, offset + 46 + nameLength).toString("utf8").replaceAll("\\", "/");
+    offset += 46 + nameLength + extraLength + commentLength;
+    if (!entryName || entryName.endsWith("/") || entryName.startsWith("__MACOSX/")) continue;
+    if (entryName.includes("/")) { const e = new Error("certificate_zip_must_use_root_files"); e.statusCode = 400; throw e; }
+    if (!entryName.toLowerCase().endsWith(".pdf")) { const e = new Error("certificate_zip_only_pdf"); e.statusCode = 400; throw e; }
+    const racerId = normalizeRacerId(path.basename(entryName, path.extname(entryName)));
+    if (seen.has(racerId)) { const e = new Error("duplicate_certificate_racer"); e.statusCode = 400; throw e; }
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) { const e = new Error("invalid_zip"); e.statusCode = 400; throw e; }
+    const localNameLength = buffer.readUInt16LE(localOffset + 26), localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength, dataEnd = dataStart + compressedSize;
+    if (dataEnd > buffer.length || uncompressedSize > MAX_FILE_SIZE) { const e = new Error("certificate_pdf_too_large"); e.statusCode = 413; throw e; }
+    const compressed = buffer.subarray(dataStart, dataEnd);
+    let pdf;
+    if (method === 0) pdf = Buffer.from(compressed);
+    else if (method === 8) pdf = zlib.inflateRawSync(compressed);
+    else { const e = new Error("unsupported_zip_compression"); e.statusCode = 400; throw e; }
+    if (pdf.length !== uncompressedSize || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") { const e = new Error("invalid_certificate_pdf"); e.statusCode = 415; throw e; }
+    seen.add(racerId);
+    certificates.push({ racerId, fileName: entryName, bytes: pdf });
+  }
+  if (!certificates.length) { const e = new Error("certificate_zip_empty"); e.statusCode = 400; throw e; }
+  return certificates;
+}
+function storeCertificateBuffer(raceId, racerId, pdfBuffer) {
+  if (!isJoined(raceId, racerId)) { const e = new Error(`race_participation_required:${racerId}`); e.statusCode = 409; throw e; }
+  if (pdfBuffer.length > MAX_FILE_SIZE) { const e = new Error("pdf_too_large"); e.statusCode = 413; throw e; }
+  if (pdfBuffer.subarray(0, 5).toString("ascii") !== "%PDF-") { const e = new Error("invalid_pdf"); e.statusCode = 415; throw e; }
+  const certificates = readJson(files.certificates, []), previous = certificates.filter(item => item.raceId === raceId && item.racerId === racerId), version = previous.length + 1;
+  const dir = path.join(CERTIFICATES, raceId, racerId), part = path.join(dir, `.v${version}.part`), final = path.join(dir, `v${version}.pdf`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(part, pdfBuffer);
+  fs.rmSync(final, { force: true });
+  fs.renameSync(part, final);
+  const certificateId = `certificate-${crypto.randomUUID()}`, sha256 = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
+  const certificate = { certificateId, raceId, racerId, version, sha256, size: pdfBuffer.length, uploadedAt: new Date().toISOString(), downloadUrl: `/racer-certificates/${certificateId}/download` };
+  certificates.push(certificate); writeJson(files.certificates, certificates);
+  return certificate;
+}
 function listFiles(dir, prefix = "") {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -398,7 +519,7 @@ function proof() {
   const forbidden = aryFiles.filter(file => /\.part$/i.test(file.path) || file.path.includes("datasets/") || file.path.includes("submissions/") || (/\.pdf$/i.test(file.path) && !authorized.has(file.path)));
   const legacyDownloadFiles = organizerFiles.filter(file => file.path.includes("/datasets/") || /\/download-(policy|tickets)\.json$/.test(file.path));
   const aryRankingContent = aryFiles.filter(file => file.path !== "live-ranking-meta.json" && /live-ranking/i.test(file.path));
-  const rankingMismatches = rankingMeta.filter(item => item.available && !item.stale).filter(item => {
+  const rankingMismatches = rankingMeta.filter(item => item.available && !item.stale && !item.frozen).filter(item => {
     const file = racePaths(item.raceId).liveRanking;
     return !fs.existsSync(file) || sha256File(file) !== item.sha256;
   });
@@ -419,7 +540,7 @@ function proof() {
       { name: "ARY 仅保存授权长期 PDF", passed: forbidden.length === 0, evidence: forbidden.length ? `发现未授权文件：${forbidden.map(f => f.path).join(", ")}` : `已允许 ${authorized.size} 个公开归档或私人证书 PDF` },
       { name: "长期归档与证书哈希一致", passed: longTermMismatches.length === 0, evidence: longTermMismatches.length ? `不一致文件：${longTermMismatches.map(([file]) => file).join(", ")}` : `已验证 ${authorized.size} 个长期 PDF` },
       { name: "赛题仅以 ARY 结构化字段保存", passed: legacyDownloadFiles.length === 0 && invalidChallenges.length === 0, evidence: legacyDownloadFiles.length ? `Organizer 仍有遗留下载文件：${legacyDownloadFiles.map(file => file.path).join(", ")}` : invalidChallenges.length ? `发现 ${invalidChallenges.length} 条无效结构化赛题` : `已验证 ${challenges.length} 条结构化赛题，Organizer 无赛题文件或票据` },
-      { name: "实时排名正文仅保存在 Organizer", passed: aryRankingContent.length === 0 && rankingMismatches.length === 0, evidence: aryRankingContent.length ? `ARY 发现排名正文：${aryRankingContent.map(file => file.path).join(", ")}` : rankingMismatches.length ? `排名哈希不一致：${rankingMismatches.map(item => item.raceId).join(", ")}` : `已验证 ${rankingMeta.filter(item => item.available && !item.stale).length} 个有效实时排名文件` },
+      { name: "实时排名正文仅保存在 Organizer", passed: aryRankingContent.length === 0 && rankingMismatches.length === 0, evidence: aryRankingContent.length ? `ARY 发现排名正文：${aryRankingContent.map(file => file.path).join(", ")}` : rankingMismatches.length ? `排名哈希不一致：${rankingMismatches.map(item => item.raceId).join(", ")}` : `已验证 ${rankingMeta.filter(item => item.available && !item.stale && !item.frozen).length} 个活跃实时排名文件，${rankingMeta.filter(item => item.frozen).length} 个已停止投影` },
       { name: "Organizer 无失败提交残留", passed: partials.length === 0, evidence: partials.length ? `发现临时文件：${partials.map(f => f.path).join(", ")}` : "所有赛事目录均无 .part 临时文件" },
       { name: "全部提交回执与 Organizer 文件一致", passed: mismatches.length === 0, evidence: mismatches.length ? `不匹配赛事：${mismatches.map(m => m.raceId).join(", ")}` : `已验证 ${metadata.filter(m => m.submissionHash).length} 个当前提交` }
     ],
@@ -429,20 +550,34 @@ function proof() {
 function posterSvg(title) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><rect width="1200" height="630" fill="#081426"/><circle cx="980" cy="110" r="220" fill="#10b981" opacity=".14"/><text x="80" y="105" fill="#55d6be" font-size="28" font-family="Arial">AGENT RACING YARD · PUBLIC ARCHIVE</text><text x="80" y="250" fill="white" font-size="64" font-weight="700" font-family="Arial">${title}</text><text x="80" y="330" fill="#b9c9dc" font-size="32" font-family="Arial">控制面与数据面分离 · 多赛事独立管理</text></svg>`;
 }
-function raceView(race) {
+function raceView(race, racerId = DEFAULT_RACER_ID) {
   const paths = racePaths(race.raceId);
   const participants = readJson(files.participations, []).filter(item => item.raceId === race.raceId);
-  const metadata = getMetadata(race.raceId);
+  const raceMetadata = Object.values(readJson(files.metadata, {})).filter(item => item.raceId === race.raceId);
+  const submissionCount = raceMetadata.filter(item => item.submissionStatus === "submitted").length;
+  const metadata = getMetadata(race.raceId, racerId);
   const manifest = readJson(paths.manifest, {});
   if (manifest.disclosure) manifest.disclosure.timeline = timelineText(race);
   const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId), challenge = getChallenge(race.raceId), liveRanking = liveRankingView(liveRankingCache.get(race.raceId));
-  return { ...race, status: raceStatus(race), manifest, challenge, challengeConfigured: Boolean(challenge), liveRanking, archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, metadata, archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === RACER_ID).at(-1) || null };
+  return { ...race, status: raceStatus(race), manifest, challenge, challengeConfigured: Boolean(challenge), liveRanking, archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, submissionCount, metadata, archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === racerId).at(-1) || null };
 }
-function roleState(role) {
-  const races = readJson(files.races, []).map(raceView);
-  if (role === "ary") return { races, liveRankings: publicLiveRankings(), audits: readJson(files.audit, []).slice(0, 30), proof: proof() };
+function roleState(role, context = {}) {
+  const racerId = normalizeRacerId(context.racerId);
+  const races = readJson(files.races, []).map(race => raceView(race, racerId));
+  if (role === "ary") return { races, liveRankings: publicLiveRankings(), liveRankingMeta: readJson(files.liveRankingMeta, {}), audits: readJson(files.audit, []).slice(0, 30), proof: proof() };
   if (role === "organizer") return { races };
-  if (role === "racer") return { races: races.map(race => { const joined = isJoined(race.raceId); return { raceId: race.raceId, createdAt: race.createdAt, startsAt: race.startsAt, endsAt: race.endsAt, status: race.status, manifest: race.manifest, challengeConfigured: race.challengeConfigured, challenge: joined ? race.challenge : undefined, joined, metadata: race.metadata }; }), certificates: readJson(files.certificates, []).filter(item => item.racerId === RACER_ID) };
+  if (role === "racer") return {
+    racerId,
+    races: races.map(race => {
+      const joined = isJoined(race.raceId, racerId);
+      const liveRanking = race.manifest.disclosure?.liveRankingVisible ? race.liveRanking : null;
+      const myRanking = liveRanking?.rows?.find(row => row.racerId === racerId) || null;
+      return { raceId: race.raceId, createdAt: race.createdAt, startsAt: race.startsAt, endsAt: race.endsAt, status: race.status, manifest: race.manifest, challengeConfigured: race.challengeConfigured, challenge: joined ? race.challenge : undefined, joined, metadata: race.metadata, liveRanking, myRanking };
+    }),
+    certificates: readJson(files.certificates, [])
+      .filter(item => item.racerId === racerId)
+      .map(item => ({ ...item, downloadUrl: `${item.downloadUrl}?racer=${encodeURIComponent(racerId)}` }))
+  };
   return { archives: readJson(files.archives, []).map(latestArchive).filter(Boolean), liveRankings: publicLiveRankings() };
 }
 
@@ -453,7 +588,8 @@ const roleRules = {
   visitor: ["GET /api/state", "GET /api/live-rankings/events"]
 };
 function dynamicAllowed(role, method, p) {
-  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|disclosure|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
+  if (role === "ary") return /^\/api\/ary\/races\/[^/]+\/force-finish$/.test(p);
+  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|disclosure|archive|archive-poster|extend|certificates-bulk)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
   if (role === "racer") return /^\/api\/racer\/races\/[^/]+\/(join|submissions)$/.test(p) || /^\/racer-certificates\/[^/]+\/download$/.test(p);
   if (role === "visitor") return /^\/archive-assets\/[^/]+\/v\d+\/poster\.pdf$/.test(p);
   return false;
@@ -474,12 +610,13 @@ function createRoleServer(role) {
     const protectedPath = p.startsWith("/api/") || p.startsWith("/organizer/races/") || p.startsWith("/archive-assets/") || p.startsWith("/racer-certificates/");
     if (protectedPath && !roleRules[role].includes(rule) && !dynamicAllowed(role, req.method, p)) return json(res, 403, { error: "role_forbidden", role });
     try {
+      const requestRacerId = role === "racer" ? racerIdFromRequest(req, url) : DEFAULT_RACER_ID;
       if (req.method === "GET" && p === "/api/live-rankings/events") {
         res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "Connection": "keep-alive" });
         liveRankingClients.add(res); sendSse(res, "rankings", publicLiveRankings());
         req.on("close", () => liveRankingClients.delete(res)); return;
       }
-      if (req.method === "GET" && p === "/api/state") return json(res, 200, roleState(role));
+      if (req.method === "GET" && p === "/api/state") return json(res, 200, roleState(role, { racerId: requestRacerId }));
 
       if (req.method === "POST" && p === "/api/organizer/races") {
         const input = JSON.parse((await body(req)).toString("utf8") || "{}");
@@ -490,7 +627,9 @@ function createRoleServer(role) {
         const race = { raceId, organizerId: ORGANIZER_ID, createdAt, ...times };
         const manifest = { raceId, version: 1, disclosure: { title: String(input.title).trim(), summary: String(input.summary || ""), timeline: timelineText(race), posterVisible: true, liveRankingVisible: Boolean(input.liveRankingVisible) }, archiveAllowed: true, archiveFields: ["title", "summary", "timeline", "poster", "rankingSummary"] };
         writeJson(paths.manifest, manifest);
+        writeLiveRankingTemplate(race);
         const races = readJson(files.races, []); races.push(race); writeJson(files.races, races);
+        loadLiveRanking(raceId, "LIVE_RANKING_TEMPLATE_CREATED");
         audit("Organizer", "RACE_CREATED", raceId, { title: manifest.disclosure.title });
         return json(res, 201, { ok: true, race: raceView(race) });
       }
@@ -535,22 +674,38 @@ function createRoleServer(role) {
         const manifest = readJson(racePaths(match[1]).manifest, null); if (!manifest || !manifest.disclosure.posterVisible) return text(res, 404, "poster unavailable");
         res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store" }); return res.end(posterSvg(manifest.disclosure.title));
       }
+      match = p.match(/^\/api\/ary\/races\/([^/]+)\/force-finish$/);
+      if (req.method === "POST" && match) {
+        const raceId = match[1], race = requireRace(raceId), previousStatus = raceStatus(race);
+        if (previousStatus !== "open") return json(res, 409, { error: "race_not_running" });
+        const operator = String(req.headers["x-operator"] || "Admin").trim() || "Admin";
+        const timestamp = new Date().toISOString();
+        const frozen = freezeLiveRanking(raceId);
+        const updated = updateRace(raceId, item => ({ ...item, endsAt: timestamp, forceFinishedAt: timestamp, forceFinishedBy: operator }));
+        const paths = racePaths(raceId), manifest = readJson(paths.manifest, {});
+        if (manifest.disclosure) {
+          manifest.disclosure.timeline = timelineText(updated);
+          writeJson(paths.manifest, manifest);
+        }
+        audit(operator, "force_finish_race", raceId, { action: "force_finish_race", race_id: raceId, operator, timestamp, previousStatus, projectionStopped: true, frozenRankingVersion: frozen?.version || null, organizerNotified: false });
+        broadcastLiveRankings();
+        return json(res, 200, { ok: true, race: raceView(updated), liveRankings: publicLiveRankings(), audit: { action: "force_finish_race", race_id: raceId, operator, timestamp } });
+      }
       match = p.match(/^\/api\/racer\/races\/([^/]+)\/join$/);
       if (req.method === "POST" && match) {
         const raceId = match[1], race = requireRace(raceId); assertRaceOpen(race);
         const participations = readJson(files.participations, []);
-        if (!isJoined(raceId)) { participations.push({ raceId, racerId: RACER_ID, joinedAt: new Date().toISOString() }); writeJson(files.participations, participations); setMetadata(raceId, getMetadata(raceId)); audit("Racer", "RACE_JOINED", raceId, { racerId: RACER_ID }); }
-        return json(res, 200, { ok: true });
+        if (!isJoined(raceId, requestRacerId)) { participations.push({ raceId, racerId: requestRacerId, joinedAt: new Date().toISOString() }); writeJson(files.participations, participations); setMetadata(raceId, getMetadata(raceId, requestRacerId), requestRacerId); audit("Racer", "RACE_JOINED", raceId, { racerId: requestRacerId }); }
+        return json(res, 200, { ok: true, racerId: requestRacerId });
       }
       match = p.match(/^\/api\/racer\/races\/([^/]+)\/submissions$/);
       if (req.method === "POST" && match) {
         const raceId = match[1], paths = racePaths(raceId), race = requireRace(raceId); assertRaceOpen(race);
-        if (String(req.headers["x-racer-id"] || "") !== RACER_ID) return json(res, 403, { error: "racer_not_allowed" });
-        if (!isJoined(raceId)) return json(res, 403, { error: "race_participation_required" });
-        const info = validatePdfRequest(req), final = path.join(paths.submissions, `${RACER_ID}.pdf`), result = await receivePdf(req, path.join(paths.submissions, `.${RACER_ID}.part`), final);
-        const previous = getMetadata(raceId), metadata = { raceId, racerId: RACER_ID, submissionStatus: "submitted", receiptId: `receipt-${crypto.randomUUID()}`, submissionHash: result.hash, submissionFileName: info.fileName, submissionSize: result.size, submittedAt: new Date().toISOString() };
-        setMetadata(raceId, metadata); audit("Racer", previous.submissionStatus === "submitted" ? "SUBMISSION_REPLACED" : "SUBMISSION_COMPLETED", raceId, { receiptId: metadata.receiptId, aryPersistedBytes: 0 });
-        return json(res, 200, { ok: true, receiptId: metadata.receiptId, sha256: result.hash, owner: "Organizer", aryPersistedBytes: 0, fileName: info.fileName, size: result.size });
+        if (!isJoined(raceId, requestRacerId)) return json(res, 403, { error: "race_participation_required" });
+        const info = validatePdfRequest(req), final = path.join(paths.submissions, `${requestRacerId}.pdf`), result = await receivePdf(req, path.join(paths.submissions, `.${requestRacerId}.part`), final);
+        const previous = getMetadata(raceId, requestRacerId), metadata = { raceId, racerId: requestRacerId, submissionStatus: "submitted", receiptId: `receipt-${crypto.randomUUID()}`, submissionHash: result.hash, submissionFileName: info.fileName, submissionSize: result.size, submittedAt: new Date().toISOString() };
+        setMetadata(raceId, metadata, requestRacerId); audit("Racer", previous.submissionStatus === "submitted" ? "SUBMISSION_REPLACED" : "SUBMISSION_COMPLETED", raceId, { racerId: requestRacerId, receiptId: metadata.receiptId, aryPersistedBytes: 0 });
+        return json(res, 200, { ok: true, racerId: requestRacerId, receiptId: metadata.receiptId, sha256: result.hash, owner: "Organizer", aryPersistedBytes: 0, fileName: info.fileName, size: result.size });
       }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/archive$/);
       if (req.method === "POST" && match) {
@@ -578,13 +733,17 @@ function createRoleServer(role) {
       if (req.method === "POST" && match) {
         const raceId = match[1], racerId = match[2], race = requireRace(raceId); validatePdfRequest(req);
         if (raceStatus(race) !== "ended") return json(res, 409, { error: "race_not_ended" });
-        if (!isJoined(raceId, racerId)) return json(res, 409, { error: "race_participation_required" });
-        const certificates = readJson(files.certificates, []), previous = certificates.filter(item => item.raceId === raceId && item.racerId === racerId), version = previous.length + 1;
-        const dir = path.join(CERTIFICATES, raceId, racerId), final = path.join(dir, `v${version}.pdf`), result = await receivePdf(req, path.join(dir, `.v${version}.part`), final);
-        const certificateId = `certificate-${crypto.randomUUID()}`;
-        const certificate = { certificateId, raceId, racerId, version, sha256: result.hash, size: result.size, uploadedAt: new Date().toISOString(), downloadUrl: `/racer-certificates/${certificateId}/download` };
-        certificates.push(certificate); writeJson(files.certificates, certificates);
-        audit("Organizer", "PRIVATE_CERTIFICATE_UPLOADED", raceId, { racerId, version, sha256: result.hash }); return json(res, 200, { ok: true, certificate });
+        const pdf = await body(req), certificate = storeCertificateBuffer(raceId, normalizeRacerId(racerId), pdf);
+        audit("Organizer", "PRIVATE_CERTIFICATE_UPLOADED", raceId, { racerId: certificate.racerId, version: certificate.version, sha256: certificate.sha256 }); return json(res, 200, { ok: true, certificate });
+      }
+      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/certificates-bulk$/);
+      if (req.method === "POST" && match) {
+        const raceId = match[1], race = requireRace(raceId); validateZipRequest(req);
+        if (raceStatus(race) !== "ended") return json(res, 409, { error: "race_not_ended" });
+        const zipBuffer = await body(req, MAX_ZIP_SIZE), entries = parseCertificateZip(zipBuffer), certificates = [];
+        for (const entry of entries) certificates.push(storeCertificateBuffer(raceId, entry.racerId, entry.bytes));
+        audit("Organizer", "PRIVATE_CERTIFICATES_BULK_UPLOADED", raceId, { count: certificates.length, racerIds: certificates.map(item => item.racerId) });
+        return json(res, 200, { ok: true, certificates });
       }
       match = p.match(/^\/archive-assets\/([^/]+)\/v(\d+)\/poster\.pdf$/);
       if (req.method === "GET" && match) {
@@ -596,7 +755,7 @@ function createRoleServer(role) {
       match = p.match(/^\/racer-certificates\/([^/]+)\/download$/);
       if (req.method === "GET" && match) {
         const certificate = readJson(files.certificates, []).find(item => item.certificateId === match[1]);
-        if (!certificate || certificate.racerId !== RACER_ID) return json(res, 404, { error: "certificate_not_found" });
+        if (!certificate || certificate.racerId !== requestRacerId) return json(res, 404, { error: "certificate_not_found" });
         const file = path.join(CERTIFICATES, certificate.raceId, certificate.racerId, `v${certificate.version}.pdf`);
         res.writeHead(200, { "Content-Type": "application/pdf", "Content-Length": fs.statSync(file).size, "Content-Disposition": `attachment; filename="${certificate.raceId}-${certificate.racerId}-certificate-v${certificate.version}.pdf"` }); return fs.createReadStream(file).pipe(res);
       }

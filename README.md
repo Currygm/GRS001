@@ -59,11 +59,13 @@ ary-storage/
 
 1. 在 `4312` Organizer 控制台创建两场赛事，并为其中一场填写结构化赛题。
 2. 在 `4313` Racer 工作台查看赛事列表并分别参加；操作组件仅在参加后出现。
+   - 同一 Racer 端口支持多个参赛身份，可在页面顶部切换 `racer-001`、`racer-002`、`racer-003`，或直接打开 `http://127.0.0.1:4313/?racer=racer-002`。
 3. 验证未配置赛题时仍可提交；参加赛事后可查看 ARY 保存的结构化赛题。
 4. 在 Racer 工作台提交并重提 PDF，观察当前结果被覆盖且 ARY 持久化始终为 `0 B`。
 5. 赛事结束后在 Organizer 控制台发布回顾，在 `4314` 查看归档列表。
 6. 在 `4311` ARY 管理端查看赛事总览并执行全部赛事存储扫描。
-7. 将分数 JSON 原子写入 Organizer 本地 `live-ranking.json`，观察 `4311` 与 `4314` 无需刷新自动更新排名。
+7. 将分数 JSON 原子写入 Organizer 本地 `live-ranking.json`，观察 `4311` 与 `4314` 无需刷新自动更新排名。文件内 `raceId` 必须等于所在目录的真实赛事 ID，例如 `organizer-storage/races/<raceId>/live-ranking.json` 内也必须写同一个 `<raceId>`。
+8. 在 `4311` ARY 管理端点击运行中赛事卡片的“强制结束比赛”，赛事会立即结束，当前内存排名被冻结，后续 `live-ranking.json` 文件变更不再拉取。
 
 赛事到达结束时间后无需重启或后台定时任务，下一次页面刷新或 API 请求会立即按 `ended` 状态处理。已结束赛事延长结束时间后可以恢复为 `open`。
 
@@ -79,12 +81,20 @@ ary-storage/
 ## 实时排名披露
 
 - 创建赛事或后续编辑披露时，可开启或撤回实时排名公开。
-- Organizer 或本地计分程序直接原子更新 `live-ranking.json`，Demo UI 只展示同步状态和排序结果。
+- Organizer 或本地计分程序直接原子更新 `live-ranking.json`，Demo UI 展示同步状态、排序结果；Racer 工作台会显示公开排名和当前 Racer 的名次。
 - 本地文件字段为 `raceId`、递增 `version`、`updatedAt` 和 `scores`；每条分数只包含 `racerId` 与 `score`。
+- Organizer 创建赛事时会自动生成一个带真实 `raceId` 的空 `live-ranking.json` 模板；本地计分程序只需要更新 `version`、`updatedAt` 和 `scores`。
 - ARY 监听 Organizer 文件变化，校验后仅在内存中缓存分数投影并计算排名，通过 SSE `/api/live-rankings/events` 推送至 ARY 与 Visitor。
 - ARY 按 `score` 降序排序，分数相同时按 `racerId` 字典序稳定排序。
 - 只有状态为 `open` 且披露开关开启的赛事会公开实时排名；赛事结束或撤回披露后自动停止展示。
-- 文件无效时继续展示上一有效内存版本并标记为过期；较低版本会被忽略。ARY 仅持久化同步元数据、哈希和审计记录。
+- 文件无效时继续展示上一有效内存版本并标记为过期；较低版本会被忽略。ARY 管理端会显示最近一次同步错误。ARY 仅持久化同步元数据、哈希和审计记录。
+
+## ARY 强制结束比赛
+
+- “强制结束比赛”只在 ARY 管理端提供，对应接口为 `POST /api/ary/races/:raceId/force-finish`。
+- 接口仅允许结束运行中的赛事；成功后写入 `forceFinishedAt`、`forceFinishedBy`，并把 `endsAt` 设置为操作时间。
+- 强制结束前会尝试同步一次最新 `live-ranking.json`，随后将当前内存排名标记为冻结并停止后续投影拉取。
+- 审计日志会记录 `force_finish_race`，包含 `race_id`、`operator`、`timestamp`、冻结排名版本和投影停止标记。
 
 ## PDF 验证规则
 
@@ -92,6 +102,7 @@ ary-storage/
 - Organizer 接收上传时会校验文件头是否以 `%PDF-` 开始。
 - 非 PDF 文件或伪装成 PDF 的文本内容会被拒绝。
 - 提交使用 `POST /api/racer/races/:raceId/submissions`，要求 Racer 已参加对应赛事。
+- Racer 身份通过 `X-Racer-Id` 请求头或 `?racer=<racerId>` URL 参数传入；后端按 `raceId:racerId` 分开保存参加关系、流程元数据和 Organizer 本地提交文件。
 - ARY 使用流式管道转发，Organizer 先写入 `.part`，校验成功后原子重命名；失败时立即清理。
 - 安全证明中心会验证 Organizer 不存在赛题文件、下载策略或票据，并验证 ARY 只保存结构化赛题字段及授权长期 PDF。
 
@@ -105,7 +116,9 @@ ary-storage/
 
 赛事结束后，Organizer 可以上传最终 PDF 海报、结构化排名和优秀作品摘要，并发布到 ARY 长期存储。每次发布产生独立版本，Visitor 只看到最新版本，ARY 管理端保留全部历史版本、授权哈希和审计记录。
 
-Organizer 还可以为已参加赛事的 Racer 上传私人证书 PDF。证书由 ARY 私有保存，仅对应 Racer 端口可列出和下载，Visitor、ARY 公共资产路径及其他角色均不能访问证书下载接口。
+Organizer 还可以在赛事结束后批量上传私人证书 ZIP。ZIP 根目录下每份证书必须按 Racer ID 命名，例如 `racer-001.pdf`、`racer-002.pdf`。证书由 ARY 私有保存，仅对应 Racer 端口可列出和下载，Visitor、ARY 公共资产路径及其他角色均不能访问证书下载接口。
+
+长期归档发布时由 Organizer 提交前十名最终排名，每条排名只包含 `rank`、`racerId`、`score`。Organizer 同时填写前三名优秀作品的标题、摘要和公开 Demo URL，服务端会把优秀作品绑定到最终排名的前三名。
 
 ```text
 ary-storage/
@@ -122,7 +135,7 @@ organizer-storage/races/<raceId>/
 
 - `POST /api/organizer/races/:raceId/archive-poster`
 - `POST /api/organizer/races/:raceId/archive`
-- `POST /api/organizer/races/:raceId/certificates/:racerId`
+- `POST /api/organizer/races/:raceId/certificates-bulk`
 - `GET /racer-certificates/:certificateId/download`
 
 归档和证书操作只允许在赛事结束后执行。安全证明允许并验证上述两类授权 PDF，同时继续拒绝 ARY Storage 中出现赛题、提交、临时分块或其他未授权 PDF。

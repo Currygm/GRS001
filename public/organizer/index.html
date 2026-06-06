@@ -74,25 +74,35 @@
             <pre id="archivePosterResult">等待操作</pre>
           </div>
           <div>
-            <label>私人证书 PDF（racer-001）<input id="certificateFile" type="file" accept="application/pdf,.pdf"></label>
-            <button id="uploadCertificate">上传私人证书</button>
+            <label>私人证书 ZIP<input id="certificatesZipFile" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
+            <p class="hint">ZIP 根目录下每个证书 PDF 必须按 Racer ID 命名，例如 racer-001.pdf、racer-002.pdf。</p>
+            <button id="uploadCertificatesZip">批量上传证书 ZIP</button>
             <pre id="certificateResult">等待操作</pre>
           </div>
         </div>
         <div class="two-col">
           <div>
-            <h3>最终排名</h3>
-            <label>名次<input id="resultRank" type="number" min="1" value="1"></label>
-            <label>Racer ID<input id="resultRacerId" value="racer-001"></label>
-            <label>分数<input id="resultScore" type="number" value="92"></label>
-            <label>奖项<input id="resultAward" value="优胜奖"></label>
-            <label>评语<textarea id="resultComment"></textarea></label>
+            <h3>最终排名（前十名）</h3>
+            <div id="archiveRankingInputs" class="ranking-form">
+              <div class="ranking-input-row"><span>第 1 名</span><input id="archiveRacer1" placeholder="racer-001"><input id="archiveScore1" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 2 名</span><input id="archiveRacer2" placeholder="racer-002"><input id="archiveScore2" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 3 名</span><input id="archiveRacer3" placeholder="racer-003"><input id="archiveScore3" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 4 名</span><input id="archiveRacer4" placeholder="racer-004"><input id="archiveScore4" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 5 名</span><input id="archiveRacer5" placeholder="racer-005"><input id="archiveScore5" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 6 名</span><input id="archiveRacer6" placeholder="racer-006"><input id="archiveScore6" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 7 名</span><input id="archiveRacer7" placeholder="racer-007"><input id="archiveScore7" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 8 名</span><input id="archiveRacer8" placeholder="racer-008"><input id="archiveScore8" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 9 名</span><input id="archiveRacer9" placeholder="racer-009"><input id="archiveScore9" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span>第 10 名</span><input id="archiveRacer10" placeholder="racer-010"><input id="archiveScore10" type="number" step="any" placeholder="score"></div>
+            </div>
           </div>
           <div>
-            <h3>优秀作品摘要</h3>
-            <label>标题<input id="showcaseTitle"></label>
-            <label>摘要<textarea id="showcaseSummary"></textarea></label>
-            <label>公开 Demo URL<input id="showcaseUrl" type="url"></label>
+            <h3>前三名优秀作品</h3>
+            <div id="topShowcaseFields">
+              <div class="showcase-field"><span id="showcaseRacer1">第 1 名</span><label>作品标题<input id="showcaseTitle1"></label><label>摘要<textarea id="showcaseSummary1"></textarea></label><label>公开 Demo URL<input id="showcaseUrl1" type="url"></label></div>
+              <div class="showcase-field"><span id="showcaseRacer2">第 2 名</span><label>作品标题<input id="showcaseTitle2"></label><label>摘要<textarea id="showcaseSummary2"></textarea></label><label>公开 Demo URL<input id="showcaseUrl2" type="url"></label></div>
+              <div class="showcase-field"><span id="showcaseRacer3">第 3 名</span><label>作品标题<input id="showcaseTitle3"></label><label>摘要<textarea id="showcaseSummary3"></textarea></label><label>公开 Demo URL<input id="showcaseUrl3" type="url"></label></div>
+            </div>
           </div>
         </div>
         <button id="publishArchive" class="archive-btn">发布新的长期归档版本</button>
