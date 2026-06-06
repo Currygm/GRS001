@@ -339,3 +339,59 @@ test("racer role can subscribe to live ranking SSE", async () => {
   assert.equal(result.statusCode, 200);
   assert.match(result.contentType, /text\/event-stream/);
 });
+
+test("frontend identifies required and optional editable fields", () => {
+  const organizerHtml = fs.readFileSync(
+    path.join(PROJECT_ROOT, "public", "organizer", "index.html"),
+    "utf8"
+  );
+  const racerHtml = fs.readFileSync(
+    path.join(PROJECT_ROOT, "public", "racer", "index.html"),
+    "utf8"
+  );
+
+  const requiredOrganizerFields = [
+    "createTitle",
+    "createStartsAt",
+    "createEndsAt",
+    "titleInput",
+    "extendEndsAt",
+    "challengeTitle",
+    "challengeDescription",
+    "archivePosterFile",
+    "archiveRacer1",
+    "archiveScore1"
+  ];
+  const optionalOrganizerFields = [
+    "createSummary",
+    "summaryInput",
+    "challengeSubmissionRequirements",
+    "challengeEvaluationCriteria",
+    "challengeNotes",
+    "certificatesZipFile",
+    ...Array.from({ length: 9 }, (_, index) => `archiveRacer${index + 2}`),
+    ...Array.from({ length: 9 }, (_, index) => `archiveScore${index + 2}`),
+    ...Array.from({ length: 3 }, (_, index) => `showcaseTitle${index + 1}`),
+    ...Array.from({ length: 3 }, (_, index) => `showcaseSummary${index + 1}`),
+    ...Array.from({ length: 3 }, (_, index) => `showcaseUrl${index + 1}`)
+  ];
+
+  for (const id of requiredOrganizerFields) {
+    assert.match(
+      organizerHtml,
+      new RegExp(`<(?:input|textarea)[^>]*id="${id}"[^>]*data-requirement="required"`)
+    );
+  }
+  for (const id of optionalOrganizerFields) {
+    assert.match(
+      organizerHtml,
+      new RegExp(`<(?:input|textarea)[^>]*id="${id}"[^>]*data-requirement="optional"`)
+    );
+  }
+
+  assert.match(organizerHtml, /class="field-label required"/);
+  assert.match(organizerHtml, /class="field-label optional"/);
+  assert.match(racerHtml, /id="racerIdInput"[^>]*data-requirement="required"/);
+  assert.match(racerHtml, /id="submissionFile"[^>]*data-requirement="required"/);
+  assert.match(racerHtml, /class="field-label required"/);
+});

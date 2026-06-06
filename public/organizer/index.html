@@ -16,10 +16,11 @@
     <div class="two-col">
       <div class="panel">
         <h2>创建赛事</h2>
-        <label>赛事标题<input id="createTitle" required></label>
-        <label>公开摘要<textarea id="createSummary"></textarea></label>
-        <label>开始时间（仅限今天）<input id="createStartsAt" type="datetime-local" required></label>
-        <label>结束时间<input id="createEndsAt" type="datetime-local" required></label>
+        <p class="form-legend"><span class="required-mark">*</span> 必填；<span class="optional-mark">选填</span> 非必填</p>
+        <label><span class="field-label required">赛事标题</span><input id="createTitle" data-requirement="required" required></label>
+        <label><span class="field-label optional">公开摘要</span><textarea id="createSummary" data-requirement="optional"></textarea></label>
+        <label><span class="field-label required">开始时间（仅限今天）</span><input id="createStartsAt" data-requirement="required" type="datetime-local" required></label>
+        <label><span class="field-label required">结束时间</span><input id="createEndsAt" data-requirement="required" type="datetime-local" required></label>
         <label class="toggle"><input id="createLiveRankingVisible" type="checkbox"><span>创建后公开实时排名</span></label>
         <button id="createRace">创建赛事</button>
       </div>
@@ -30,10 +31,11 @@
       <div class="two-col">
         <div class="panel">
           <h2>赛事披露</h2>
-          <label>标题<input id="titleInput"></label>
-          <label>摘要<textarea id="summaryInput"></textarea></label>
+          <p class="form-legend"><span class="required-mark">*</span> 必填；<span class="optional-mark">选填</span> 非必填</p>
+          <label><span class="field-label required">标题</span><input id="titleInput" data-requirement="required" required></label>
+          <label><span class="field-label optional">摘要</span><textarea id="summaryInput" data-requirement="optional"></textarea></label>
           <p id="raceTimeStatus"></p>
-          <label>延长结束时间<input id="extendEndsAt" type="datetime-local" required></label>
+          <label><span class="field-label required">延长结束时间</span><input id="extendEndsAt" data-requirement="required" type="datetime-local" required></label>
           <button id="extendRace" class="secondary">延长结束时间</button>
           <label class="toggle"><input id="posterVisible" type="checkbox"><span>公开赛事海报</span></label>
           <label class="toggle"><input id="liveRankingVisible" type="checkbox"><span>公开实时排名</span></label>
@@ -42,11 +44,12 @@
         <div class="panel">
           <h2>结构化赛题（保存至 ARY）</h2>
           <p id="challengeStatus"></p>
-          <label>赛题标题<input id="challengeTitle" required></label>
-          <label>任务描述<textarea id="challengeDescription" required></textarea></label>
-          <label>提交要求<textarea id="challengeSubmissionRequirements"></textarea></label>
-          <label>评审标准<textarea id="challengeEvaluationCriteria"></textarea></label>
-          <label>补充说明<textarea id="challengeNotes"></textarea></label>
+          <p class="form-legend"><span class="required-mark">*</span> 必填；<span class="optional-mark">选填</span> 非必填</p>
+          <label><span class="field-label required">赛题标题</span><input id="challengeTitle" data-requirement="required" required></label>
+          <label><span class="field-label required">任务描述</span><textarea id="challengeDescription" data-requirement="required" required></textarea></label>
+          <label><span class="field-label optional">提交要求</span><textarea id="challengeSubmissionRequirements" data-requirement="optional"></textarea></label>
+          <label><span class="field-label optional">评审标准</span><textarea id="challengeEvaluationCriteria" data-requirement="optional"></textarea></label>
+          <label><span class="field-label optional">补充说明</span><textarea id="challengeNotes" data-requirement="optional"></textarea></label>
           <button id="saveChallenge">保存结构化赛题</button>
         </div>
       </div>
@@ -69,12 +72,12 @@
         <p id="archiveStatus"></p>
         <div class="two-col">
           <div>
-            <label>最终 PDF 海报<input id="archivePosterFile" type="file" accept="application/pdf,.pdf"></label>
+            <label><span class="field-label required">最终 PDF 海报</span><input id="archivePosterFile" data-requirement="required" type="file" accept="application/pdf,.pdf" required></label>
             <button id="uploadArchivePoster">上传或替换最终海报</button>
             <pre id="archivePosterResult">等待操作</pre>
           </div>
           <div>
-            <label>私人证书 ZIP<input id="certificatesZipFile" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
+            <label><span class="field-label optional">私人证书 ZIP</span><input id="certificatesZipFile" data-requirement="optional" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
             <p class="hint">ZIP 根目录下每个证书 PDF 必须按 Racer ID 命名，例如 racer-001.pdf、racer-002.pdf。</p>
             <button id="uploadCertificatesZip">批量上传证书 ZIP</button>
             <pre id="certificateResult">等待操作</pre>
@@ -84,24 +87,24 @@
           <div>
             <h3>最终排名（前十名）</h3>
             <div id="archiveRankingInputs" class="ranking-form">
-              <div class="ranking-input-row"><span>第 1 名</span><input id="archiveRacer1" placeholder="racer-001"><input id="archiveScore1" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 2 名</span><input id="archiveRacer2" placeholder="racer-002"><input id="archiveScore2" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 3 名</span><input id="archiveRacer3" placeholder="racer-003"><input id="archiveScore3" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 4 名</span><input id="archiveRacer4" placeholder="racer-004"><input id="archiveScore4" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 5 名</span><input id="archiveRacer5" placeholder="racer-005"><input id="archiveScore5" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 6 名</span><input id="archiveRacer6" placeholder="racer-006"><input id="archiveScore6" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 7 名</span><input id="archiveRacer7" placeholder="racer-007"><input id="archiveScore7" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 8 名</span><input id="archiveRacer8" placeholder="racer-008"><input id="archiveScore8" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 9 名</span><input id="archiveRacer9" placeholder="racer-009"><input id="archiveScore9" type="number" step="any" placeholder="score"></div>
-              <div class="ranking-input-row"><span>第 10 名</span><input id="archiveRacer10" placeholder="racer-010"><input id="archiveScore10" type="number" step="any" placeholder="score"></div>
+              <div class="ranking-input-row"><span class="field-label required">第 1 名</span><input id="archiveRacer1" data-requirement="required" placeholder="Racer ID" required><input id="archiveScore1" data-requirement="required" type="number" step="any" placeholder="分数" required></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 2 名</span><input id="archiveRacer2" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore2" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 3 名</span><input id="archiveRacer3" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore3" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 4 名</span><input id="archiveRacer4" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore4" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 5 名</span><input id="archiveRacer5" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore5" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 6 名</span><input id="archiveRacer6" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore6" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 7 名</span><input id="archiveRacer7" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore7" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 8 名</span><input id="archiveRacer8" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore8" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 9 名</span><input id="archiveRacer9" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore9" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
+              <div class="ranking-input-row"><span class="field-label optional">第 10 名</span><input id="archiveRacer10" data-requirement="optional" placeholder="Racer ID"><input id="archiveScore10" data-requirement="optional" type="number" step="any" placeholder="分数"></div>
             </div>
           </div>
           <div>
             <h3>前三名优秀作品</h3>
             <div id="topShowcaseFields">
-              <div class="showcase-field"><span id="showcaseRacer1">第 1 名</span><label>作品标题<input id="showcaseTitle1"></label><label>摘要<textarea id="showcaseSummary1"></textarea></label><label>公开 Demo URL<input id="showcaseUrl1" type="url"></label></div>
-              <div class="showcase-field"><span id="showcaseRacer2">第 2 名</span><label>作品标题<input id="showcaseTitle2"></label><label>摘要<textarea id="showcaseSummary2"></textarea></label><label>公开 Demo URL<input id="showcaseUrl2" type="url"></label></div>
-              <div class="showcase-field"><span id="showcaseRacer3">第 3 名</span><label>作品标题<input id="showcaseTitle3"></label><label>摘要<textarea id="showcaseSummary3"></textarea></label><label>公开 Demo URL<input id="showcaseUrl3" type="url"></label></div>
+              <div class="showcase-field"><span id="showcaseRacer1">第 1 名</span><label><span class="field-label optional">作品标题</span><input id="showcaseTitle1" data-requirement="optional"></label><label><span class="field-label optional">摘要</span><textarea id="showcaseSummary1" data-requirement="optional"></textarea></label><label><span class="field-label optional">公开 Demo URL</span><input id="showcaseUrl1" data-requirement="optional" type="url"></label></div>
+              <div class="showcase-field"><span id="showcaseRacer2">第 2 名</span><label><span class="field-label optional">作品标题</span><input id="showcaseTitle2" data-requirement="optional"></label><label><span class="field-label optional">摘要</span><textarea id="showcaseSummary2" data-requirement="optional"></textarea></label><label><span class="field-label optional">公开 Demo URL</span><input id="showcaseUrl2" data-requirement="optional" type="url"></label></div>
+              <div class="showcase-field"><span id="showcaseRacer3">第 3 名</span><label><span class="field-label optional">作品标题</span><input id="showcaseTitle3" data-requirement="optional"></label><label><span class="field-label optional">摘要</span><textarea id="showcaseSummary3" data-requirement="optional"></textarea></label><label><span class="field-label optional">公开 Demo URL</span><input id="showcaseUrl3" data-requirement="optional" type="url"></label></div>
             </div>
           </div>
         </div>

@@ -13,3 +13,6 @@ npm-debug.log*
 # Demo runtime storage. The server recreates required directories and JSON files.
 ary-storage/
 organizer-storage/
+
+# Local agent progress record
+/PROGRESS.md
