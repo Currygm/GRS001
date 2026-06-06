@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const roleStyles = document.createElement("style");
-roleStyles.textContent = ".hidden{display:none!important}.race-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:30px}.race-card{margin-bottom:0}.race-select{display:block;width:100%;margin-bottom:8px;text-align:left}button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:800px){.race-grid{grid-template-columns:1fr}}";
+roleStyles.textContent = ".hidden{display:none!important}.race-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:30px}.race-card{margin-bottom:0}.race-select{display:block;width:100%;margin-bottom:8px;text-align:left}.ranking-row{display:grid;grid-template-columns:80px 1fr 120px 1fr auto;gap:10px;align-items:end;margin-bottom:10px}.ranking-row label{margin:0}.ranking-row button{background:var(--red)}button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:800px){.race-grid,.ranking-row{grid-template-columns:1fr}}";
 document.head.appendChild(roleStyles);
 const formatDateTime = value => new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 const toLocalInput = date => {

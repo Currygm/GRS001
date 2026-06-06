@@ -1,1 +1,27 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ARY 管理端</title><link rel="stylesheet" href="/styles.css"></head><body><header><div class="brand"><div class="mark">ARY</div><div><strong>ARY 管理端</strong><span>多赛事控制面与安全证明</span></div></div><div class="status"><i></i> 端口 4311</div></header><main><div class="section-head"><div><span class="eyebrow">RACE OVERVIEW</span><h1>赛事总览</h1></div><button id="reset" class="secondary">清空 Demo</button></div><div id="raceList" class="race-grid"></div><div class="section-head"><div><span class="eyebrow">SECURITY EVIDENCE</span><h1>全部赛事安全证明</h1></div><button id="runProof">执行存储扫描</button></div><div id="proofClaims" class="claim-grid"></div><div class="two-col"><div class="panel"><h2>Organizer Storage</h2><div id="organizerFiles"></div></div><div class="panel"><h2>ARY Storage</h2><div id="aryFiles"></div></div></div><div class="panel"><h2>审计日志</h2><div id="auditLog"></div></div></main><div id="toast"></div><script src="/common.js"></script><script src="/ary/app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ARY 管理端</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="mark">ARY</div><div><strong>ARY 管理端</strong><span>多赛事控制面与安全证明</span></div></div>
+    <div class="status"><i></i> 端口 4311</div>
+  </header>
+  <main>
+    <div class="section-head"><div><span class="eyebrow">LIVE DISCLOSURE</span><h1>公开实时排名</h1></div><span id="liveConnection" class="status">正在连接</span></div>
+    <div id="liveRankingList" class="race-grid"></div>
+    <div class="section-head"><div><span class="eyebrow">RACE OVERVIEW</span><h1>赛事总览</h1></div><button id="reset" class="secondary">清空 Demo</button></div>
+    <div id="raceList" class="race-grid"></div>
+    <div class="section-head"><div><span class="eyebrow">SECURITY EVIDENCE</span><h1>全部赛事安全证明</h1></div><button id="runProof">执行存储扫描</button></div>
+    <div id="proofClaims" class="claim-grid"></div>
+    <div class="two-col"><div class="panel"><h2>Organizer Storage</h2><div id="organizerFiles"></div></div><div class="panel"><h2>ARY Storage</h2><div id="aryFiles"></div></div></div>
+    <div class="panel"><h2>审计日志</h2><div id="auditLog"></div></div>
+  </main>
+  <div id="toast"></div>
+  <script src="/common.js"></script><script src="/ary/app.js"></script>
+</body>
+</html>

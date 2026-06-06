@@ -33,12 +33,23 @@ const files = {
   audit: path.join(ARY, "audit.json"),
   archives: path.join(ARY, "archives.json"),
   certificates: path.join(ARY, "certificates.json"),
-  challenges: path.join(ARY, "challenges.json")
+  challenges: path.join(ARY, "challenges.json"),
+  liveRankingMeta: path.join(ARY, "live-ranking-meta.json")
 };
+const liveRankingCache = new Map();
+const liveRankingClients = new Set();
+const rankingDebounce = new Map();
+let rankingWatcher;
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2), "utf8");
+}
+function writeJsonAtomic(file, value) {
+  const part = `${file}.part`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(part, JSON.stringify(value, null, 2), "utf8");
+  fs.renameSync(part, file);
 }
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch { return fallback; }
@@ -55,8 +66,11 @@ function init() {
   if (!fs.existsSync(files.archives)) writeJson(files.archives, []);
   if (!fs.existsSync(files.certificates)) writeJson(files.certificates, []);
   if (!fs.existsSync(files.challenges)) writeJson(files.challenges, {});
+  if (!fs.existsSync(files.liveRankingMeta)) writeJson(files.liveRankingMeta, {});
   migrateRaceTimes();
   removeLegacyDownloadData();
+  scanLiveRankings();
+  watchLiveRankings();
 }
 
 function localDateKey(date) {
@@ -139,6 +153,7 @@ function racePaths(raceId) {
     submissions: path.join(root, "submissions"),
     archive: path.join(root, "archive"),
     archivePoster: path.join(root, "archive", "poster.pdf"),
+    liveRanking: path.join(root, "live-ranking.json"),
     manifest: path.join(root, "manifest.json")
   };
 }
@@ -156,6 +171,78 @@ function setChallenge(raceId, challenge) {
   const challenges = readJson(files.challenges, {});
   challenges[raceId] = challenge;
   writeJson(files.challenges, challenges);
+}
+function validateLiveRanking(input, raceId) {
+  if (!input || input.raceId !== raceId || !Number.isInteger(input.version) || input.version < 1 || !Array.isArray(input.rows)) throw new Error("invalid_live_ranking");
+  if (!Number.isFinite(new Date(input.updatedAt).getTime())) throw new Error("invalid_live_ranking");
+  const rows = input.rows.map(item => {
+    const rank = Number(item.rank), score = Number(item.score), racerId = String(item.racerId || "").trim(), status = String(item.status || "").trim();
+    if (!Number.isInteger(rank) || rank < 1 || !racerId || !Number.isFinite(score) || !status) throw new Error("invalid_live_ranking");
+    return { rank, racerId, score, status };
+  });
+  if (new Set(rows.map(row => row.rank)).size !== rows.length) throw new Error("duplicate_live_ranking_rank");
+  return { raceId, version: input.version, updatedAt: new Date(input.updatedAt).toISOString(), rows: rows.sort((a, b) => a.rank - b.rank) };
+}
+function writeLiveRankingMeta(raceId, value) {
+  const all = readJson(files.liveRankingMeta, {});
+  all[raceId] = value;
+  writeJson(files.liveRankingMeta, all);
+}
+function publicLiveRankings() {
+  return readJson(files.races, []).flatMap(race => {
+    const manifest = readJson(racePaths(race.raceId).manifest, {});
+    const cached = liveRankingCache.get(race.raceId);
+    if (raceStatus(race) !== "open" || !manifest.disclosure?.liveRankingVisible || !cached) return [];
+    return [{ raceId: race.raceId, title: manifest.disclosure.title, version: cached.version, updatedAt: cached.updatedAt, sha256: cached.sha256, stale: Boolean(cached.stale), rows: cached.rows }];
+  });
+}
+function sendSse(res, event, value) { res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); }
+function broadcastLiveRankings() {
+  const snapshot = publicLiveRankings();
+  for (const client of liveRankingClients) {
+    try { sendSse(client, "rankings", snapshot); } catch { liveRankingClients.delete(client); }
+  }
+}
+function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED") {
+  const file = racePaths(raceId).liveRanking;
+  if (!fs.existsSync(file)) {
+    if (liveRankingCache.delete(raceId)) {
+      writeLiveRankingMeta(raceId, { raceId, available: false, stale: false, syncedAt: new Date().toISOString() });
+      audit("ARY", "LIVE_RANKING_REMOVED", raceId);
+      broadcastLiveRankings();
+    }
+    return;
+  }
+  try {
+    const raw = fs.readFileSync(file, "utf8"), parsed = validateLiveRanking(JSON.parse(raw.replace(/^\uFEFF/, "")), raceId), previous = liveRankingCache.get(raceId);
+    if (previous && parsed.version < previous.version) { audit("ARY", "LIVE_RANKING_OLD_VERSION_IGNORED", raceId, { version: parsed.version, currentVersion: previous.version }); return; }
+    const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
+    if (previous?.sha256 === sha256 && !previous.stale) return;
+    const cached = { ...parsed, sha256, stale: false };
+    liveRankingCache.set(raceId, cached);
+    writeLiveRankingMeta(raceId, { raceId, available: true, version: cached.version, sha256, updatedAt: cached.updatedAt, syncedAt: new Date().toISOString(), stale: false });
+    audit("ARY", action, raceId, { version: cached.version, sha256 }); broadcastLiveRankings();
+  } catch (error) {
+    const previous = liveRankingCache.get(raceId);
+    if (previous && !previous.stale) liveRankingCache.set(raceId, { ...previous, stale: true });
+    writeLiveRankingMeta(raceId, { raceId, available: Boolean(previous), version: previous?.version || null, sha256: previous?.sha256 || null, updatedAt: previous?.updatedAt || null, syncedAt: new Date().toISOString(), stale: true, error: error.message });
+    audit("ARY", "LIVE_RANKING_SYNC_FAILED", raceId, { error: error.message }); broadcastLiveRankings();
+  }
+}
+function scanLiveRankings() {
+  if (!fs.existsSync(RACES)) return;
+  for (const raceId of fs.readdirSync(RACES)) if (fs.statSync(path.join(RACES, raceId)).isDirectory()) loadLiveRanking(raceId, "LIVE_RANKING_LOADED");
+}
+function scheduleRankingLoad(raceId) {
+  clearTimeout(rankingDebounce.get(raceId));
+  rankingDebounce.set(raceId, setTimeout(() => { rankingDebounce.delete(raceId); loadLiveRanking(raceId); }, 80));
+}
+function watchLiveRankings() {
+  rankingWatcher?.close();
+  rankingWatcher = fs.watch(RACES, { recursive: true }, (event, relative) => {
+    if (!relative || path.basename(relative) !== "live-ranking.json") return;
+    scheduleRankingLoad(String(relative).split(/[\\/]/)[0]);
+  });
 }
 function sha256File(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
 function latestArchive(record) {
@@ -281,6 +368,7 @@ function proof() {
   const aryFiles = listFiles(ARY);
   const metadata = Object.values(readJson(files.metadata, {}));
   const challenges = Object.values(readJson(files.challenges, {}));
+  const rankingMeta = Object.values(readJson(files.liveRankingMeta, {}));
   const challengeFields = new Set(["raceId", "title", "description", "submissionRequirements", "evaluationCriteria", "notes", "version", "updatedAt", "updatedBy"]);
   const challengeStringFields = ["raceId", "title", "description", "submissionRequirements", "evaluationCriteria", "notes", "updatedAt", "updatedBy"];
   const invalidChallenges = challenges.filter(challenge =>
@@ -294,6 +382,11 @@ function proof() {
   for (const certificate of readJson(files.certificates, [])) authorized.set(`certificates/${certificate.raceId}/${certificate.racerId}/v${certificate.version}.pdf`, certificate.sha256);
   const forbidden = aryFiles.filter(file => /\.part$/i.test(file.path) || file.path.includes("datasets/") || file.path.includes("submissions/") || (/\.pdf$/i.test(file.path) && !authorized.has(file.path)));
   const legacyDownloadFiles = organizerFiles.filter(file => file.path.includes("/datasets/") || /\/download-(policy|tickets)\.json$/.test(file.path));
+  const aryRankingContent = aryFiles.filter(file => file.path !== "live-ranking-meta.json" && /live-ranking/i.test(file.path));
+  const rankingMismatches = rankingMeta.filter(item => item.available && !item.stale).filter(item => {
+    const file = racePaths(item.raceId).liveRanking;
+    return !fs.existsSync(file) || sha256File(file) !== item.sha256;
+  });
   const longTermMismatches = [...authorized].filter(([relative, hash]) => {
     const absolute = path.join(ARY, relative);
     return !fs.existsSync(absolute) || sha256File(absolute) !== hash;
@@ -305,12 +398,13 @@ function proof() {
     return !file || file.sha256 !== item.submissionHash.slice(0, 16);
   });
   return {
-    passed: forbidden.length === 0 && longTermMismatches.length === 0 && legacyDownloadFiles.length === 0 && invalidChallenges.length === 0 && partials.length === 0 && mismatches.length === 0,
+    passed: forbidden.length === 0 && longTermMismatches.length === 0 && legacyDownloadFiles.length === 0 && invalidChallenges.length === 0 && aryRankingContent.length === 0 && rankingMismatches.length === 0 && partials.length === 0 && mismatches.length === 0,
     checkedAt: new Date().toISOString(),
     claims: [
       { name: "ARY 仅保存授权长期 PDF", passed: forbidden.length === 0, evidence: forbidden.length ? `发现未授权文件：${forbidden.map(f => f.path).join(", ")}` : `已允许 ${authorized.size} 个公开归档或私人证书 PDF` },
       { name: "长期归档与证书哈希一致", passed: longTermMismatches.length === 0, evidence: longTermMismatches.length ? `不一致文件：${longTermMismatches.map(([file]) => file).join(", ")}` : `已验证 ${authorized.size} 个长期 PDF` },
       { name: "赛题仅以 ARY 结构化字段保存", passed: legacyDownloadFiles.length === 0 && invalidChallenges.length === 0, evidence: legacyDownloadFiles.length ? `Organizer 仍有遗留下载文件：${legacyDownloadFiles.map(file => file.path).join(", ")}` : invalidChallenges.length ? `发现 ${invalidChallenges.length} 条无效结构化赛题` : `已验证 ${challenges.length} 条结构化赛题，Organizer 无赛题文件或票据` },
+      { name: "实时排名正文仅保存在 Organizer", passed: aryRankingContent.length === 0 && rankingMismatches.length === 0, evidence: aryRankingContent.length ? `ARY 发现排名正文：${aryRankingContent.map(file => file.path).join(", ")}` : rankingMismatches.length ? `排名哈希不一致：${rankingMismatches.map(item => item.raceId).join(", ")}` : `已验证 ${rankingMeta.filter(item => item.available && !item.stale).length} 个有效实时排名文件` },
       { name: "Organizer 无失败提交残留", passed: partials.length === 0, evidence: partials.length ? `发现临时文件：${partials.map(f => f.path).join(", ")}` : "所有赛事目录均无 .part 临时文件" },
       { name: "全部提交回执与 Organizer 文件一致", passed: mismatches.length === 0, evidence: mismatches.length ? `不匹配赛事：${mismatches.map(m => m.raceId).join(", ")}` : `已验证 ${metadata.filter(m => m.submissionHash).length} 个当前提交` }
     ],
@@ -326,25 +420,25 @@ function raceView(race) {
   const metadata = getMetadata(race.raceId);
   const manifest = readJson(paths.manifest, {});
   if (manifest.disclosure) manifest.disclosure.timeline = timelineText(race);
-  const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId), challenge = getChallenge(race.raceId);
-  return { ...race, status: raceStatus(race), manifest, challenge, challengeConfigured: Boolean(challenge), archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, metadata, archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === RACER_ID).at(-1) || null };
+  const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId), challenge = getChallenge(race.raceId), liveRanking = liveRankingCache.get(race.raceId) || null;
+  return { ...race, status: raceStatus(race), manifest, challenge, challengeConfigured: Boolean(challenge), liveRanking, archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, metadata, archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === RACER_ID).at(-1) || null };
 }
 function roleState(role) {
   const races = readJson(files.races, []).map(raceView);
-  if (role === "ary") return { races, audits: readJson(files.audit, []).slice(0, 30), proof: proof() };
+  if (role === "ary") return { races, liveRankings: publicLiveRankings(), audits: readJson(files.audit, []).slice(0, 30), proof: proof() };
   if (role === "organizer") return { races };
   if (role === "racer") return { races: races.map(race => { const joined = isJoined(race.raceId); return { raceId: race.raceId, createdAt: race.createdAt, startsAt: race.startsAt, endsAt: race.endsAt, status: race.status, manifest: race.manifest, challengeConfigured: race.challengeConfigured, challenge: joined ? race.challenge : undefined, joined, metadata: race.metadata }; }), certificates: readJson(files.certificates, []).filter(item => item.racerId === RACER_ID) };
-  return { archives: readJson(files.archives, []).map(latestArchive).filter(Boolean) };
+  return { archives: readJson(files.archives, []).map(latestArchive).filter(Boolean), liveRankings: publicLiveRankings() };
 }
 
 const roleRules = {
-  ary: ["GET /api/state", "POST /api/proof/run", "POST /api/demo/reset"],
+  ary: ["GET /api/state", "GET /api/live-rankings/events", "POST /api/proof/run", "POST /api/demo/reset"],
   organizer: ["GET /api/state", "POST /api/organizer/races"],
   racer: ["GET /api/state"],
-  visitor: ["GET /api/state"]
+  visitor: ["GET /api/state", "GET /api/live-rankings/events"]
 };
 function dynamicAllowed(role, method, p) {
-  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|disclosure|review|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
+  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|live-ranking|disclosure|review|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
   if (role === "racer") return /^\/api\/racer\/races\/[^/]+\/(join|submissions)$/.test(p) || /^\/racer-certificates\/[^/]+\/download$/.test(p);
   if (role === "visitor") return /^\/archive-assets\/[^/]+\/v\d+\/poster\.pdf$/.test(p);
   return false;
@@ -365,6 +459,11 @@ function createRoleServer(role) {
     const protectedPath = p.startsWith("/api/") || p.startsWith("/organizer/races/") || p.startsWith("/archive-assets/") || p.startsWith("/racer-certificates/");
     if (protectedPath && !roleRules[role].includes(rule) && !dynamicAllowed(role, req.method, p)) return json(res, 403, { error: "role_forbidden", role });
     try {
+      if (req.method === "GET" && p === "/api/live-rankings/events") {
+        res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "Connection": "keep-alive" });
+        liveRankingClients.add(res); sendSse(res, "rankings", publicLiveRankings());
+        req.on("close", () => liveRankingClients.delete(res)); return;
+      }
       if (req.method === "GET" && p === "/api/state") return json(res, 200, roleState(role));
 
       if (req.method === "POST" && p === "/api/organizer/races") {
@@ -374,7 +473,7 @@ function createRoleServer(role) {
         const raceId = `race-${crypto.randomUUID()}`, createdAt = new Date().toISOString(), paths = racePaths(raceId);
         for (const dir of [paths.root, paths.submissions]) fs.mkdirSync(dir, { recursive: true });
         const race = { raceId, organizerId: ORGANIZER_ID, createdAt, ...times };
-        const manifest = { raceId, version: 1, disclosure: { title: String(input.title).trim(), summary: String(input.summary || ""), timeline: timelineText(race), posterVisible: true }, archiveAllowed: true, archiveFields: ["title", "summary", "timeline", "poster", "rankingSummary"] };
+        const manifest = { raceId, version: 1, disclosure: { title: String(input.title).trim(), summary: String(input.summary || ""), timeline: timelineText(race), posterVisible: true, liveRankingVisible: Boolean(input.liveRankingVisible) }, archiveAllowed: true, archiveFields: ["title", "summary", "timeline", "poster", "rankingSummary"] };
         writeJson(paths.manifest, manifest);
         const races = readJson(files.races, []); races.push(race); writeJson(files.races, races);
         audit("Organizer", "RACE_CREATED", raceId, { title: manifest.disclosure.title });
@@ -400,11 +499,19 @@ function createRoleServer(role) {
         setChallenge(raceId, challenge); audit("Organizer", "CHALLENGE_UPDATED", raceId, { version: challenge.version });
         return json(res, 200, { ok: true, challenge, race: raceView(race) });
       }
+      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/live-ranking$/);
+      if (req.method === "PUT" && match) {
+        const raceId = match[1], paths = racePaths(raceId); requireRace(raceId);
+        const input = JSON.parse((await body(req)).toString("utf8") || "{}"), previous = liveRankingCache.get(raceId);
+        const ranking = validateLiveRanking({ raceId, version: (previous?.version || 0) + 1, updatedAt: new Date().toISOString(), rows: input.rows }, raceId);
+        writeJsonAtomic(paths.liveRanking, ranking); loadLiveRanking(raceId, "LIVE_RANKING_UPDATED");
+        return json(res, 200, { ok: true, ranking: liveRankingCache.get(raceId) });
+      }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/disclosure$/);
       if (req.method === "POST" && match) {
         const raceId = match[1], paths = racePaths(raceId), input = JSON.parse((await body(req)).toString("utf8") || "{}"); requireRace(raceId);
-        const manifest = readJson(paths.manifest, {}); manifest.version += 1; manifest.disclosure = { ...manifest.disclosure, title: String(input.title || manifest.disclosure.title), summary: String(input.summary ?? manifest.disclosure.summary), timeline: timelineText(requireRace(raceId)), posterVisible: Boolean(input.posterVisible) };
-        writeJson(paths.manifest, manifest); audit("Organizer", "DISCLOSURE_UPDATED", raceId, { version: manifest.version }); return json(res, 200, { ok: true, manifest });
+        const manifest = readJson(paths.manifest, {}); manifest.version += 1; manifest.disclosure = { ...manifest.disclosure, title: String(input.title || manifest.disclosure.title), summary: String(input.summary ?? manifest.disclosure.summary), timeline: timelineText(requireRace(raceId)), posterVisible: Boolean(input.posterVisible), liveRankingVisible: Boolean(input.liveRankingVisible) };
+        writeJson(paths.manifest, manifest); audit("Organizer", "DISCLOSURE_UPDATED", raceId, { version: manifest.version, liveRankingVisible: manifest.disclosure.liveRankingVisible }); broadcastLiveRankings(); return json(res, 200, { ok: true, manifest });
       }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/extend$/);
       if (req.method === "POST" && match) {
@@ -494,7 +601,7 @@ function createRoleServer(role) {
       }
       if (req.method === "POST" && p === "/api/proof/run") { const result = proof(); audit("ARY", "SECURITY_PROOF_EXECUTED", "all-races", { passed: result.passed }); return json(res, 200, result); }
       if (req.method === "POST" && p === "/api/demo/reset") {
-        clearDir(RACES); clearDir(ARCHIVE); clearDir(CERTIFICATES); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); writeJson(files.certificates, []); writeJson(files.challenges, {}); return json(res, 200, { ok: true });
+        clearDir(RACES); clearDir(ARCHIVE); clearDir(CERTIFICATES); liveRankingCache.clear(); writeJson(files.races, []); writeJson(files.participations, []); writeJson(files.metadata, {}); writeJson(files.audit, []); writeJson(files.archives, []); writeJson(files.certificates, []); writeJson(files.challenges, {}); writeJson(files.liveRankingMeta, {}); broadcastLiveRankings(); return json(res, 200, { ok: true });
       }
       if (serveStatic(res, p, role)) return;
       json(res, 404, { error: "not_found" });
@@ -503,3 +610,9 @@ function createRoleServer(role) {
 }
 
 for (const [role, port] of Object.entries(PORTS)) createRoleServer(role).listen(port, HOST, () => console.log(`${role.toUpperCase()} UI running at http://${HOST}:${port}`));
+setInterval(() => {
+  for (const client of liveRankingClients) {
+    try { client.write(": heartbeat\n\n"); } catch { liveRankingClients.delete(client); }
+  }
+  broadcastLiveRankings();
+}, 3000);
