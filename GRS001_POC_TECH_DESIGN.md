@@ -249,7 +249,7 @@ flowchart LR
 | --- | --- | --- |
 | Organizer控制台 | HTML/CSS/JavaScript | 创建Race、配置披露、上传归档和证书ZIP |
 | Organizer本地服务 | Node.js | 当前POC中与ARY共享同一Node进程模拟 |
-| Organizer本地存储 | 本地文件系统 | 保存`manifest.json`、`live-ranking.json`、提交PDF |
+| Organizer本地存储 | 本地文件系统 | 保存披露控制`manifest.json`、`live-ranking.json`、提交PDF |
 | Projection Layer | JSON文件+文件监听 | 监听`live-ranking.json`变化 |
 | ARY Backend | Node.js原生HTTP | 提供多角色API、SSE、审计和安全扫描 |
 | ARY Storage | JSON文件+本地目录 | 保存公开元数据、归档、证书、审计、投影元信息 |
@@ -1026,10 +1026,13 @@ organizer-storage/races/<raceId>/live-ranking.json
 
 - `raceId`必须等于目标Race ID。
 - `version`必须是正整数。
+- 新投影`version`必须严格大于上一有效版本；相同版本内容变化视为冲突并拒绝。
 - `updatedAt`必须是合法时间。
 - `scores`必须是数组。
+- 投影顶层和分数行拒绝未知字段，每行必须显式提供合法`racerId`。
 - 每个`racerId`不能重复。
 - `score`必须是数字。
+- 分数行最多1000条，投影文件最大1 MiB。
 
 ARY处理方式：
 
@@ -1059,7 +1062,7 @@ ARY持久化存储示例：
 
 ```text
 ary-storage/
-  races.json
+  races.json          # 标题、摘要、时间、Organizer ID等公开赛事元数据
   challenges.json
   participations.json
   metadata.json
@@ -1072,6 +1075,8 @@ ary-storage/
 ```
 
 其中`live-ranking-meta.json`只保存投影元信息，不保存排名正文。
+
+Organizer侧`manifest.json`只保存`posterVisible`、`liveRankingVisible`等披露控制和归档策略，不再保存标题、摘要和时间线。旧Demo数据在启动时自动迁移：公开元数据写入`races.json`，Manifest中的重复公开字段被移除。
 
 ### 7.4ARY Frontend
 
@@ -1132,6 +1137,7 @@ Visitor公开页负责：
 - 查看公开长期归档。
 - 查看前十名公开最终排名。
 - 查看前三名优秀作品。
+- 只访问当前公开归档版本；历史归档和历史海报仅ARY管理端可访问。
 
 Visitor不能访问：
 
@@ -1255,9 +1261,10 @@ POST /api/organizer/races/:raceId/archive
 
 - `results`最多10条。
 - 每条只包含`rank`、`racerId`、`score`。
+- `rank`必须从1开始连续排列，未知字段直接拒绝。
 - 不包含奖项字段。
 - 不包含评分细节。
-- `showcases`最多3条，并绑定最终排名前三名。
+- `showcases`最多3条，超量直接拒绝，并绑定最终排名前三名。
 
 ### 8.7证书ZIP批量上传
 
@@ -1444,8 +1451,10 @@ ARY通过以下方式保证不越界保存数据：
 - ARY是否存在Racer提交文件。
 - ARY是否存在数据集目录。
 - ARY是否存在实时排名正文文件。
+- ARY各JSON索引是否符合字段白名单，是否出现`sourceData`、`scoreBreakdown`、`fullRanking`、`scores`、`rows`等越界字段。
 - 投影元信息哈希是否和Organizer文件一致。
 - 完赛证书和公开归档哈希是否一致。
+- ARY提交回执是否都能对应Organizer文件，Organizer提交PDF是否都存在ARY回执。
 
 若发现未授权源数据，POC判定失败。
 

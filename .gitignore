@@ -1,0 +1,15 @@
+# Runtime logs
+*.log
+
+# Temporary and partial files
+*.part
+*.tmp
+*.temp
+
+# Node.js local artifacts
+node_modules/
+npm-debug.log*
+
+# Demo runtime storage. The server recreates required directories and JSON files.
+ary-storage/
+organizer-storage/
