@@ -14,7 +14,7 @@
   <main>
     <div class="section-head"><div><span class="eyebrow">RACER IDENTITY</span><h1>参赛身份</h1></div><span id="racerBadge" class="status"><i></i> racer-001</span></div>
     <div class="panel identity-panel">
-      <label>Racer ID<input id="racerIdInput" autocomplete="off" spellcheck="false"></label>
+      <label><span class="field-label required">Racer ID</span><input id="racerIdInput" data-requirement="required" autocomplete="off" spellcheck="false" required></label>
       <div class="identity-actions">
         <button class="secondary" data-racer-preset="racer-001">racer-001</button>
         <button class="secondary" data-racer-preset="racer-002">racer-002</button>
@@ -30,7 +30,7 @@
       <div id="racerRanking" class="panel hidden"></div>
       <div class="two-col">
         <div class="panel"><h2>结构化赛题</h2><div id="challengeDetail"></div></div>
-        <div class="panel action-panel"><div class="icon">↑</div><h2>提交比赛结果</h2><label>本地 PDF<input id="submissionFile" type="file" accept="application/pdf,.pdf"></label><button id="uploadSubmission">流式提交 PDF</button><pre id="uploadResult">等待操作</pre></div>
+        <div class="panel action-panel"><div class="icon">↑</div><h2>提交比赛结果</h2><label><span class="field-label required">本地 PDF</span><input id="submissionFile" data-requirement="required" type="file" accept="application/pdf,.pdf" required></label><button id="uploadSubmission">流式提交 PDF</button><pre id="uploadResult">等待操作</pre></div>
       </div>
     </section>
     <div class="section-head"><div><span class="eyebrow">PRIVATE LONG-TERM ASSETS</span><h1>我的长期证书</h1></div></div>

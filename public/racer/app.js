@@ -15,6 +15,7 @@ function initialRacerId() {
 }
 
 let racerId = initialRacerId();
+let liveRankingEvents;
 const selected = () => state.races.find(r => r.raceId === selectedRaceId);
 
 function persistRacerId(nextRacerId) {
@@ -49,6 +50,26 @@ function rankingTeaser(r) {
   return r.myRanking
     ? `<p>我的排名：第 ${r.myRanking.rank} 名 · ${escapeHtml(String(r.myRanking.score))}</p>`
     : `<p>公开排名已发布 · 你尚未进入投影榜单</p>`;
+}
+
+function applyLiveRankings(rankings) {
+  if (!state) return;
+  const byRaceId = new Map(rankings.map(ranking => [ranking.raceId, ranking]));
+  state.races = state.races.map(race => {
+    const liveRanking = byRaceId.get(race.raceId) || null;
+    return {
+      ...race,
+      liveRanking,
+      myRanking: liveRanking?.rows?.find(row => row.racerId === racerId) || null
+    };
+  });
+  render();
+}
+
+function connectLiveRankings() {
+  const events = new EventSource(`/api/live-rankings/events?racer=${encodeURIComponent(racerId)}`);
+  events.addEventListener("rankings", event => applyLiveRankings(JSON.parse(event.data)));
+  return events;
 }
 
 function render() {
@@ -103,6 +124,8 @@ $("uploadSubmission").onclick = async () => {
 
 $("saveRacerId").onclick = async () => {
   persistRacerId($("racerIdInput").value);
+  liveRankingEvents?.close();
+  liveRankingEvents = connectLiveRankings();
   selectedRaceId = null;
   toast(`已切换至 ${racerId}`);
   await refresh();
@@ -111,6 +134,8 @@ $("saveRacerId").onclick = async () => {
 document.querySelectorAll("[data-racer-preset]").forEach(button => {
   button.onclick = async () => {
     persistRacerId(button.dataset.racerPreset);
+    liveRankingEvents?.close();
+    liveRankingEvents = connectLiveRankings();
     selectedRaceId = null;
     toast(`已切换至 ${racerId}`);
     await refresh();
@@ -119,4 +144,5 @@ document.querySelectorAll("[data-racer-preset]").forEach(button => {
 
 persistRacerId(racerId);
 refresh();
+liveRankingEvents = connectLiveRankings();
 setInterval(() => { if (!["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) refresh(); }, 5000);
