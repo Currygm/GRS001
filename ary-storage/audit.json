@@ -1,80 +1,127 @@
 [
   {
-    "id": "98e4704a-1a7b-4f6b-a0db-1ee58f805693",
-    "at": "2026-06-05T11:07:47.501Z",
+    "id": "e9d121b9-5465-4f7d-a03f-49fa24ec9e0a",
+    "at": "2026-06-06T09:33:39.915Z",
     "actor": "Organizer",
-    "action": "PUBLIC_ARCHIVE_PUBLISHED",
-    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
-    "detail": {}
-  },
-  {
-    "id": "02874218-1afd-4285-bbcb-77430ac599dd",
-    "at": "2026-06-05T11:07:24.996Z",
-    "actor": "Racer",
-    "action": "RACE_JOINED",
-    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "action": "PUBLIC_ARCHIVE_VERSION_PUBLISHED",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
     "detail": {
-      "racerId": "racer-001"
+      "version": 1,
+      "posterSha256": "b746a1f196bad09dee52dd4a86d2b47f6c79fe6a01e50c8ca0307febd0fcdec3",
+      "consentHash": "a64257f018bdc51917408be3b55be09a0d70515182e269cab5d5279ef0f0bbc8"
     }
   },
   {
-    "id": "0bb89f0d-a0cd-473b-94dc-752407b884ca",
-    "at": "2026-06-05T11:07:10.400Z",
+    "id": "7de877fb-0f82-4d6f-b711-646cc0fc9dca",
+    "at": "2026-06-06T09:33:30.283Z",
+    "actor": "Organizer",
+    "action": "ARCHIVE_POSTER_STAGED",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+    "detail": {
+      "sha256": "b746a1f196bad09dee52dd4a86d2b47f6c79fe6a01e50c8ca0307febd0fcdec3",
+      "size": 901875
+    }
+  },
+  {
+    "id": "d2b56abd-9235-4823-bd96-0d411507de2b",
+    "at": "2026-06-06T09:32:28.404Z",
+    "actor": "Admin",
+    "action": "force_finish_race",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+    "detail": {
+      "action": "force_finish_race",
+      "race_id": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+      "operator": "Admin",
+      "timestamp": "2026-06-06T09:32:28.398Z",
+      "previousStatus": "open",
+      "projectionStopped": true,
+      "frozenRankingVersion": 1,
+      "organizerNotified": false
+    }
+  },
+  {
+    "id": "1c919b17-805f-4b45-8959-90af48bd794f",
+    "at": "2026-06-06T09:31:57.233Z",
     "actor": "Organizer",
     "action": "RACE_CREATED",
-    "target": "race-60781e5f-b6b2-44ea-852e-996dceb540ad",
+    "target": "race-54a63f2e-48ff-4bf2-907f-972d4c89015f",
     "detail": {
-      "title": "666"
+      "title": "2"
     }
   },
   {
-    "id": "9b4038dd-f0a7-43b0-bfb7-df5b64c0c085",
-    "at": "2026-06-05T11:06:47.714Z",
-    "actor": "Organizer",
-    "action": "PUBLIC_ARCHIVE_PUBLISHED",
-    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
-    "detail": {}
+    "id": "e6126917-1e45-4d83-9d7b-7e283ff31bd1",
+    "at": "2026-06-06T09:31:57.231Z",
+    "actor": "ARY",
+    "action": "LIVE_RANKING_TEMPLATE_CREATED",
+    "target": "race-54a63f2e-48ff-4bf2-907f-972d4c89015f",
+    "detail": {
+      "version": 1,
+      "sha256": "f0acb95719e06af2fa078af8d9c04588ceb77bebddc524d7ad2ff1fa826a5e65"
+    }
   },
   {
-    "id": "8391ddca-6ea2-48e3-b016-862a3a91d022",
-    "at": "2026-06-05T11:06:16.486Z",
+    "id": "de74381a-4d2e-4f7e-87c3-baf23f1444fa",
+    "at": "2026-06-06T09:30:07.828Z",
     "actor": "Racer",
     "action": "RACE_JOINED",
-    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
     "detail": {
-      "racerId": "racer-001"
+      "racerId": "racer-002"
     }
   },
   {
-    "id": "241108c4-23cc-487d-b874-182c569a1491",
-    "at": "2026-06-05T11:05:59.861Z",
-    "actor": "Organizer",
-    "action": "DATASET_UPLOADED",
-    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
-    "detail": {
-      "fileName": "思想汇报规范.pdf",
-      "size": 2195097,
-      "sha256": "8a800961ced634417540bc5e9e63e03e6949af9d331072015ad5fdf231ed68a3"
-    }
-  },
-  {
-    "id": "9d85d001-9995-4122-89b5-5b3286be0dee",
-    "at": "2026-06-05T11:04:50.739Z",
+    "id": "83219fac-eeac-4815-a159-7d5ccccdf60e",
+    "at": "2026-06-06T09:29:59.722Z",
     "actor": "Organizer",
     "action": "DISCLOSURE_UPDATED",
-    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
     "detail": {
-      "version": 2
+      "version": 3,
+      "liveRankingVisible": true
     }
   },
   {
-    "id": "ddedadaf-83f1-471b-bcb2-d370759a1e62",
-    "at": "2026-06-05T11:04:22.053Z",
+    "id": "7a8481ec-b2f4-408b-8bc3-fdc398f5fd65",
+    "at": "2026-06-06T09:29:55.290Z",
+    "actor": "ARY",
+    "action": "LIVE_RANKING_SYNCED",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+    "detail": {
+      "version": 1,
+      "sha256": "6ebb211d38fa6e0f381074db5a045dd96d105e4f1949e9d2eb8c1bffeae01329"
+    }
+  },
+  {
+    "id": "e5c1f08c-e90f-44c3-ab07-3d153cccf3a3",
+    "at": "2026-06-06T09:29:25.082Z",
+    "actor": "Organizer",
+    "action": "DISCLOSURE_UPDATED",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+    "detail": {
+      "version": 2,
+      "liveRankingVisible": true
+    }
+  },
+  {
+    "id": "379b17e9-21a1-4b73-a6b3-4a96013599d0",
+    "at": "2026-06-06T09:29:15.423Z",
     "actor": "Organizer",
     "action": "RACE_CREATED",
-    "target": "race-81337311-95c7-40a9-ae27-826f2b679008",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
     "detail": {
-      "title": "agent开发"
+      "title": "1"
+    }
+  },
+  {
+    "id": "9dc8bcac-5d87-4a90-9810-595b3e048efb",
+    "at": "2026-06-06T09:29:15.421Z",
+    "actor": "ARY",
+    "action": "LIVE_RANKING_TEMPLATE_CREATED",
+    "target": "race-616e2758-85aa-4493-9afc-c4e5069ff202",
+    "detail": {
+      "version": 1,
+      "sha256": "99beb48c0ed0e999a6aa5f3f620ba356e75080686b2a13b322f7dbc7f48a55ac"
     }
   }
 ]

@@ -1,8 +1,23 @@
 $ErrorActionPreference = "Stop"
-$node = "C:\Users\gm\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+$nodeCandidates = @()
 
-if (-not (Test-Path $node)) {
-    throw "Node runtime not found: $node"
+if ($env:NODE_EXE) {
+    $nodeCandidates += $env:NODE_EXE
+}
+
+if ($env:USERPROFILE) {
+    $nodeCandidates += Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+}
+
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCommand) {
+    $nodeCandidates += $nodeCommand.Source
+}
+
+$node = $nodeCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+if (-not $node) {
+    throw "Node runtime not found. Set NODE_EXE, install Node, or use the Codex bundled runtime under your user profile."
 }
 
 $env:HOST = if ($env:HOST) { $env:HOST } else { "127.0.0.1" }
