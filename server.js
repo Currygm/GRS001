@@ -173,15 +173,19 @@ function setChallenge(raceId, challenge) {
   writeJson(files.challenges, challenges);
 }
 function validateLiveRanking(input, raceId) {
-  if (!input || input.raceId !== raceId || !Number.isInteger(input.version) || input.version < 1 || !Array.isArray(input.rows)) throw new Error("invalid_live_ranking");
+  if (!input || input.raceId !== raceId || !Number.isInteger(input.version) || input.version < 1 || !Array.isArray(input.scores)) throw new Error("invalid_live_ranking");
   if (!Number.isFinite(new Date(input.updatedAt).getTime())) throw new Error("invalid_live_ranking");
-  const rows = input.rows.map(item => {
-    const rank = Number(item.rank), score = Number(item.score), racerId = String(item.racerId || "").trim(), status = String(item.status || "").trim();
-    if (!Number.isInteger(rank) || rank < 1 || !racerId || !Number.isFinite(score) || !status) throw new Error("invalid_live_ranking");
-    return { rank, racerId, score, status };
+  const scores = input.scores.map(item => {
+    const racerId = String(item.racerId || "").trim(), score = Number(item.score);
+    if (!racerId || !Number.isFinite(score)) throw new Error("invalid_live_ranking");
+    return { racerId, score };
   });
-  if (new Set(rows.map(row => row.rank)).size !== rows.length) throw new Error("duplicate_live_ranking_rank");
-  return { raceId, version: input.version, updatedAt: new Date(input.updatedAt).toISOString(), rows: rows.sort((a, b) => a.rank - b.rank) };
+  if (new Set(scores.map(item => item.racerId)).size !== scores.length) throw new Error("duplicate_live_ranking_racer");
+  const rows = scores
+    .slice()
+    .sort((a, b) => b.score - a.score || a.racerId.localeCompare(b.racerId))
+    .map((item, index) => ({ rank: index + 1, racerId: item.racerId, score: item.score }));
+  return { raceId, version: input.version, updatedAt: new Date(input.updatedAt).toISOString(), scores, rows };
 }
 function writeLiveRankingMeta(raceId, value) {
   const all = readJson(files.liveRankingMeta, {});
@@ -195,6 +199,9 @@ function publicLiveRankings() {
     if (raceStatus(race) !== "open" || !manifest.disclosure?.liveRankingVisible || !cached) return [];
     return [{ raceId: race.raceId, title: manifest.disclosure.title, version: cached.version, updatedAt: cached.updatedAt, sha256: cached.sha256, stale: Boolean(cached.stale), rows: cached.rows }];
   });
+}
+function liveRankingView(ranking) {
+  return ranking ? { raceId: ranking.raceId, version: ranking.version, updatedAt: ranking.updatedAt, sha256: ranking.sha256, stale: Boolean(ranking.stale), rows: ranking.rows } : null;
 }
 function sendSse(res, event, value) { res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); }
 function broadcastLiveRankings() {
@@ -214,8 +221,16 @@ function loadLiveRanking(raceId, action = "LIVE_RANKING_SYNCED") {
     return;
   }
   try {
-    const raw = fs.readFileSync(file, "utf8"), parsed = validateLiveRanking(JSON.parse(raw.replace(/^\uFEFF/, "")), raceId), previous = liveRankingCache.get(raceId);
-    if (previous && parsed.version < previous.version) { audit("ARY", "LIVE_RANKING_OLD_VERSION_IGNORED", raceId, { version: parsed.version, currentVersion: previous.version }); return; }
+    const raw = fs.readFileSync(file, "utf8"), parsed = validateLiveRanking(JSON.parse(raw.replace(/^\uFEFF/, "")), raceId), previous = liveRankingCache.get(raceId), previousMeta = readJson(files.liveRankingMeta, {})[raceId];
+    const currentVersion = previous?.version || previousMeta?.version || 0;
+    if (parsed.version < currentVersion) {
+      if (previous) liveRankingCache.set(raceId, { ...previous, stale: true });
+      else liveRankingCache.delete(raceId);
+      writeLiveRankingMeta(raceId, { raceId, available: Boolean(previous), version: currentVersion, sha256: previous?.sha256 || previousMeta?.sha256 || null, updatedAt: previous?.updatedAt || previousMeta?.updatedAt || null, syncedAt: new Date().toISOString(), stale: true, error: "old_version_ignored" });
+      audit("ARY", "LIVE_RANKING_OLD_VERSION_IGNORED", raceId, { version: parsed.version, currentVersion });
+      broadcastLiveRankings();
+      return;
+    }
     const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
     if (previous?.sha256 === sha256 && !previous.stale) return;
     const cached = { ...parsed, sha256, stale: false };
@@ -280,7 +295,7 @@ function updateRace(raceId, updater) {
 function metadataKey(raceId, racerId = RACER_ID) { return `${raceId}:${racerId}`; }
 function getMetadata(raceId, racerId = RACER_ID) {
   return readJson(files.metadata, {})[metadataKey(raceId, racerId)] || {
-    raceId, racerId, submissionStatus: "not_submitted", receiptId: null, review: null
+    raceId, racerId, submissionStatus: "not_submitted", receiptId: null
   };
 }
 function setMetadata(raceId, value, racerId = RACER_ID) {
@@ -420,7 +435,7 @@ function raceView(race) {
   const metadata = getMetadata(race.raceId);
   const manifest = readJson(paths.manifest, {});
   if (manifest.disclosure) manifest.disclosure.timeline = timelineText(race);
-  const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId), challenge = getChallenge(race.raceId), liveRanking = liveRankingCache.get(race.raceId) || null;
+  const archive = archiveRecord(race.raceId), certificates = readJson(files.certificates, []).filter(item => item.raceId === race.raceId), challenge = getChallenge(race.raceId), liveRanking = liveRankingView(liveRankingCache.get(race.raceId));
   return { ...race, status: raceStatus(race), manifest, challenge, challengeConfigured: Boolean(challenge), liveRanking, archivePosterUploaded: fs.existsSync(paths.archivePoster), participantCount: participants.length, metadata, archive, certificateCount: certificates.length, racerCertificate: certificates.filter(item => item.racerId === RACER_ID).at(-1) || null };
 }
 function roleState(role) {
@@ -438,7 +453,7 @@ const roleRules = {
   visitor: ["GET /api/state", "GET /api/live-rankings/events"]
 };
 function dynamicAllowed(role, method, p) {
-  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|live-ranking|disclosure|review|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
+  if (role === "organizer") return /^\/api\/organizer\/races\/[^/]+\/(challenge|disclosure|archive|archive-poster|extend)$/.test(p) || /^\/api\/organizer\/races\/[^/]+\/certificates\/[^/]+$/.test(p) || /^\/organizer\/races\/[^/]+\/poster\.svg$/.test(p);
   if (role === "racer") return /^\/api\/racer\/races\/[^/]+\/(join|submissions)$/.test(p) || /^\/racer-certificates\/[^/]+\/download$/.test(p);
   if (role === "visitor") return /^\/archive-assets\/[^/]+\/v\d+\/poster\.pdf$/.test(p);
   return false;
@@ -499,14 +514,6 @@ function createRoleServer(role) {
         setChallenge(raceId, challenge); audit("Organizer", "CHALLENGE_UPDATED", raceId, { version: challenge.version });
         return json(res, 200, { ok: true, challenge, race: raceView(race) });
       }
-      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/live-ranking$/);
-      if (req.method === "PUT" && match) {
-        const raceId = match[1], paths = racePaths(raceId); requireRace(raceId);
-        const input = JSON.parse((await body(req)).toString("utf8") || "{}"), previous = liveRankingCache.get(raceId);
-        const ranking = validateLiveRanking({ raceId, version: (previous?.version || 0) + 1, updatedAt: new Date().toISOString(), rows: input.rows }, raceId);
-        writeJsonAtomic(paths.liveRanking, ranking); loadLiveRanking(raceId, "LIVE_RANKING_UPDATED");
-        return json(res, 200, { ok: true, ranking: liveRankingCache.get(raceId) });
-      }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/disclosure$/);
       if (req.method === "POST" && match) {
         const raceId = match[1], paths = racePaths(raceId), input = JSON.parse((await body(req)).toString("utf8") || "{}"); requireRace(raceId);
@@ -541,15 +548,9 @@ function createRoleServer(role) {
         if (String(req.headers["x-racer-id"] || "") !== RACER_ID) return json(res, 403, { error: "racer_not_allowed" });
         if (!isJoined(raceId)) return json(res, 403, { error: "race_participation_required" });
         const info = validatePdfRequest(req), final = path.join(paths.submissions, `${RACER_ID}.pdf`), result = await receivePdf(req, path.join(paths.submissions, `.${RACER_ID}.part`), final);
-        const previous = getMetadata(raceId), metadata = { raceId, racerId: RACER_ID, submissionStatus: "submitted", receiptId: `receipt-${crypto.randomUUID()}`, review: null, submissionHash: result.hash, submissionFileName: info.fileName, submissionSize: result.size, submittedAt: new Date().toISOString() };
+        const previous = getMetadata(raceId), metadata = { raceId, racerId: RACER_ID, submissionStatus: "submitted", receiptId: `receipt-${crypto.randomUUID()}`, submissionHash: result.hash, submissionFileName: info.fileName, submissionSize: result.size, submittedAt: new Date().toISOString() };
         setMetadata(raceId, metadata); audit("Racer", previous.submissionStatus === "submitted" ? "SUBMISSION_REPLACED" : "SUBMISSION_COMPLETED", raceId, { receiptId: metadata.receiptId, aryPersistedBytes: 0 });
         return json(res, 200, { ok: true, receiptId: metadata.receiptId, sha256: result.hash, owner: "Organizer", aryPersistedBytes: 0, fileName: info.fileName, size: result.size });
-      }
-      match = p.match(/^\/api\/organizer\/races\/([^/]+)\/review$/);
-      if (req.method === "POST" && match) {
-        const raceId = match[1], input = JSON.parse((await body(req)).toString("utf8") || "{}"), metadata = getMetadata(raceId); requireRace(raceId);
-        if (metadata.submissionStatus !== "submitted") return json(res, 409, { error: "no_submission" });
-        metadata.review = { score: Number(input.score || 0), comment: String(input.comment || ""), reviewedAt: new Date().toISOString(), reviewedBy: "Organizer" }; setMetadata(raceId, metadata); audit("Organizer", "SUBMISSION_REVIEWED", raceId, { score: metadata.review.score }); return json(res, 200, { ok: true, review: metadata.review });
       }
       match = p.match(/^\/api\/organizer\/races\/([^/]+)\/archive$/);
       if (req.method === "POST" && match) {

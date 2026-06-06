@@ -1,0 +1,23 @@
+{
+    "raceId":  "replace-with-target-race-id",
+    "version":  1,
+    "updatedAt":  "2026-06-06T03:00:51.8008614Z",
+    "scores":  [
+                   {
+                       "racerId":  "racer-001",
+                       "score":  98.5
+                   },
+                   {
+                       "racerId":  "racer-002",
+                       "score":  91
+                   },
+                   {
+                       "racerId":  "racer-003",
+                       "score":  91
+                   },
+                   {
+                       "racerId":  "racer-004",
+                       "score":  86.5
+                   }
+               ]
+}

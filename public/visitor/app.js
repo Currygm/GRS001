@@ -7,7 +7,7 @@ function show(a) {
 }
 
 function renderLiveRankings() {
-  $("liveRankingList").innerHTML = liveRankings.length ? liveRankings.map(ranking => `<article class="panel race-card"><span class="eyebrow">实时排名 · v${ranking.version}${ranking.stale ? " · 数据可能过期" : ""}</span><h2>${escapeHtml(ranking.title)}</h2><p>更新于 ${formatDateTime(ranking.updatedAt)}</p>${ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))} · ${escapeHtml(row.status)}</div></div>`).join("")}</article>`).join("") : `<div class="empty">暂无进行中且已公开的实时排名</div>`;
+  $("liveRankingList").innerHTML = liveRankings.length ? liveRankings.map(ranking => `<article class="panel race-card"><span class="eyebrow">实时排名 · v${ranking.version}${ranking.stale ? " · 数据可能过期" : ""}</span><h2>${escapeHtml(ranking.title)}</h2><p>更新于 ${formatDateTime(ranking.updatedAt)}</p>${ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))}</div></div>`).join("")}</article>`).join("") : `<div class="empty">暂无进行中且已公开的实时排名</div>`;
 }
 
 async function refresh() {

@@ -1,39 +1,85 @@
-let state, selectedRaceId, liveRankingRows = [];
+let state, selectedRaceId;
 const selected = () => state.races.find(r => r.raceId === selectedRaceId);
+
 async function uploadPdf(url, inputId) {
-  const f = $(inputId).files[0]; if (!f) throw new Error("请选择 PDF");
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/pdf", "X-File-Name": encodeURIComponent(f.name), "X-File-Size": String(f.size) }, body: f });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  const f = $(inputId).files[0];
+  if (!f) throw new Error("请选择 PDF");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/pdf", "X-File-Name": encodeURIComponent(f.name), "X-File-Size": String(f.size) },
+    body: f
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error);
+  return result;
 }
+
+function rankingRowsHtml(ranking) {
+  if (!ranking?.rows?.length) return `<div class="empty">暂无有效分数投影</div>`;
+  return ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))}</div></div>`).join("");
+}
+
 function render() {
-  $("raceList").innerHTML = state.races.length ? state.races.map(r => `<button class="race-select ${r.raceId === selectedRaceId ? "secondary" : ""}" data-race-id="${r.raceId}">${escapeHtml(r.manifest.disclosure.title)} · ${statusLabel(r.status)} · ${r.challengeConfigured ? `赛题 v${r.challenge.version}` : "待配置赛题"}</button>`).join("") : `<div class="empty">尚未创建赛事</div>`;
-  const r = selected(); $("detail").classList.toggle("hidden", !r); if (!r) return; const m = r.manifest.disclosure;
-  $("detailTitle").textContent = m.title; $("titleInput").value = m.title; $("summaryInput").value = m.summary; $("posterVisible").checked = m.posterVisible; $("liveRankingVisible").checked = Boolean(m.liveRankingVisible);
+  $("raceList").innerHTML = state.races.length
+    ? state.races.map(r => `<button class="race-select ${r.raceId === selectedRaceId ? "secondary" : ""}" data-race-id="${r.raceId}">${escapeHtml(r.manifest.disclosure.title)} · ${statusLabel(r.status)} · ${r.challengeConfigured ? `赛题 v${r.challenge.version}` : "待配置赛题"}</button>`).join("")
+    : `<div class="empty">尚未创建赛事</div>`;
+  const r = selected();
+  $("detail").classList.toggle("hidden", !r);
+  if (!r) return;
+  const m = r.manifest.disclosure;
+  $("detailTitle").textContent = m.title;
+  $("titleInput").value = m.title;
+  $("summaryInput").value = m.summary;
+  $("posterVisible").checked = m.posterVisible;
+  $("liveRankingVisible").checked = Boolean(m.liveRankingVisible);
   $("extendEndsAt").min = toLocalInput(new Date(Math.max(Date.now(), new Date(r.endsAt).getTime()) + 60000));
   $("raceTimeStatus").textContent = `状态：${statusLabel(r.status)} · 开始：${formatDateTime(r.startsAt)} · 结束：${formatDateTime(r.endsAt)} · ${remainingText(r)}`;
   $("challengeStatus").textContent = r.challengeConfigured ? `ARY 已保存结构化赛题 v${r.challenge.version}，更新于 ${formatDateTime(r.challenge.updatedAt)}` : "尚未配置赛题；Racer 仍可以参加和提交。";
-  $("challengeTitle").value = r.challenge?.title || ""; $("challengeDescription").value = r.challenge?.description || ""; $("challengeSubmissionRequirements").value = r.challenge?.submissionRequirements || ""; $("challengeEvaluationCriteria").value = r.challenge?.evaluationCriteria || ""; $("challengeNotes").value = r.challenge?.notes || "";
-  liveRankingRows = (r.liveRanking?.rows || liveRankingRows).map(row => ({ ...row }));
-  $("liveRankingStatus").textContent = r.liveRanking ? `本地文件 v${r.liveRanking.version} · ${r.liveRanking.stale ? "同步异常，展示上一有效版本" : "ARY 已同步"} · ${formatDateTime(r.liveRanking.updatedAt)}` : "尚未创建本地排名文件。";
-  $("liveRankingRows").innerHTML = liveRankingRows.length ? liveRankingRows.map((row, index) => `<div class="ranking-row" data-ranking-row="${index}"><label>名次<input data-field="rank" type="number" min="1" value="${row.rank}"></label><label>Racer ID<input data-field="racerId" value="${escapeHtml(row.racerId)}"></label><label>分数<input data-field="score" type="number" value="${row.score}"></label><label>状态<input data-field="status" value="${escapeHtml(row.status)}"></label><button data-remove-ranking="${index}">删除</button></div>`).join("") : `<div class="empty">暂无排名行</div>`;
-  $("submissionStatus").textContent = `参加人数：${r.participantCount} · 提交状态：${r.metadata.submissionStatus} · 评审：${r.metadata.review ? r.metadata.review.score : "未评审"}`;
-  $("livePreview").innerHTML = `<div class="preview-card">${m.posterVisible ? `<img src="/organizer/races/${r.raceId}/poster.svg?v=${r.manifest.version}">` : `<div class="empty">海报已撤回</div>`}<div><span class="eyebrow">${statusLabel(r.status)} · V${r.manifest.version}</span><h2>${escapeHtml(m.title)}</h2><p>${escapeHtml(m.summary)}</p><p>${escapeHtml(m.timeline)}</p><p>实时排名：${m.liveRankingVisible && r.status === "open" ? "公开" : "不公开"}</p>${m.liveRankingVisible && r.status === "open" && r.liveRanking ? r.liveRanking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))} · ${escapeHtml(row.status)}</div></div>`).join("") : ""}</div></div>`;
+  $("challengeTitle").value = r.challenge?.title || "";
+  $("challengeDescription").value = r.challenge?.description || "";
+  $("challengeSubmissionRequirements").value = r.challenge?.submissionRequirements || "";
+  $("challengeEvaluationCriteria").value = r.challenge?.evaluationCriteria || "";
+  $("challengeNotes").value = r.challenge?.notes || "";
+  $("liveRankingStatus").textContent = r.liveRanking
+    ? `本地分数文件 v${r.liveRanking.version} · ${r.liveRanking.stale ? "同步异常，展示上一有效排名" : "ARY 已同步并完成排序"} · ${formatDateTime(r.liveRanking.updatedAt)} · SHA256 ${r.liveRanking.sha256}`
+    : `请将分数投影原子写入 organizer-storage/races/${r.raceId}/live-ranking.json`;
+  $("liveRankingPreview").innerHTML = rankingRowsHtml(r.liveRanking);
+  $("livePreview").innerHTML = `<div class="preview-card">${m.posterVisible ? `<img src="/organizer/races/${r.raceId}/poster.svg?v=${r.manifest.version}">` : `<div class="empty">海报已撤回</div>`}<div><span class="eyebrow">${statusLabel(r.status)} · V${r.manifest.version}</span><h2>${escapeHtml(m.title)}</h2><p>${escapeHtml(m.summary)}</p><p>${escapeHtml(m.timeline)}</p><p>实时排名：${m.liveRankingVisible && r.status === "open" ? "公开" : "不公开"}</p>${m.liveRankingVisible && r.status === "open" ? rankingRowsHtml(r.liveRanking) : ""}</div></div>`;
   $("longTermArchive").classList.toggle("hidden", r.status !== "ended");
   const current = r.archive?.versions?.find(v => v.version === r.archive.currentVersion);
   $("archiveStatus").textContent = `最终海报：${r.archivePosterUploaded ? "已暂存" : "未上传"} · 当前公开版本：${current ? `v${current.version}` : "未发布"} · 私人证书版本：${r.racerCertificate ? `v${r.racerCertificate.version}` : "未上传"}`;
 }
-async function refresh(id = selectedRaceId) { state = await api("/api/state"); const next = state.races.some(r => r.raceId === id) ? id : state.races[0]?.raceId; if (next !== selectedRaceId) liveRankingRows = []; selectedRaceId = next; render(); }
-$("createRace").onclick = async () => { const x = await api("/api/organizer/races", { method: "POST", body: JSON.stringify({ title: $("createTitle").value, summary: $("createSummary").value, startsAt: new Date($("createStartsAt").value).toISOString(), endsAt: new Date($("createEndsAt").value).toISOString(), liveRankingVisible: $("createLiveRankingVisible").checked }) }); toast("赛事已创建"); await refresh(x.race.raceId); };
+
+async function refresh(id = selectedRaceId) {
+  state = await api("/api/state");
+  selectedRaceId = state.races.some(r => r.raceId === id) ? id : state.races[0]?.raceId;
+  render();
+}
+
+$("createRace").onclick = async () => {
+  const x = await api("/api/organizer/races", { method: "POST", body: JSON.stringify({ title: $("createTitle").value, summary: $("createSummary").value, startsAt: new Date($("createStartsAt").value).toISOString(), endsAt: new Date($("createEndsAt").value).toISOString(), liveRankingVisible: $("createLiveRankingVisible").checked }) });
+  toast("赛事已创建");
+  await refresh(x.race.raceId);
+};
 $("raceList").onclick = e => { const b = e.target.closest("[data-race-id]"); if (b) { selectedRaceId = b.dataset.raceId; render(); } };
 $("saveDisclosure").onclick = async () => { await api(`/api/organizer/races/${selectedRaceId}/disclosure`, { method: "POST", body: JSON.stringify({ title: $("titleInput").value, summary: $("summaryInput").value, posterVisible: $("posterVisible").checked, liveRankingVisible: $("liveRankingVisible").checked }) }); toast("披露已更新"); await refresh(); };
 $("extendRace").onclick = async () => { await api(`/api/organizer/races/${selectedRaceId}/extend`, { method: "POST", body: JSON.stringify({ endsAt: new Date($("extendEndsAt").value).toISOString() }) }); toast("赛事结束时间已延长"); await refresh(); };
 $("saveChallenge").onclick = async () => { const x = await api(`/api/organizer/races/${selectedRaceId}/challenge`, { method: "PUT", body: JSON.stringify({ title: $("challengeTitle").value, description: $("challengeDescription").value, submissionRequirements: $("challengeSubmissionRequirements").value, evaluationCriteria: $("challengeEvaluationCriteria").value, notes: $("challengeNotes").value }) }); toast(`结构化赛题 v${x.challenge.version} 已保存至 ARY`); await refresh(); };
-$("liveRankingRows").oninput = e => { const row = e.target.closest("[data-ranking-row]"); if (row && e.target.dataset.field) liveRankingRows[Number(row.dataset.rankingRow)][e.target.dataset.field] = e.target.value; };
-$("liveRankingRows").onclick = e => { const button = e.target.closest("[data-remove-ranking]"); if (button) { liveRankingRows.splice(Number(button.dataset.removeRanking), 1); render(); } };
-$("addLiveRankingRow").onclick = () => { liveRankingRows.push({ rank: liveRankingRows.length + 1, racerId: `racer-${String(liveRankingRows.length + 1).padStart(3, "0")}`, score: 0, status: "进行中" }); render(); };
-$("saveLiveRanking").onclick = async () => { const rows = liveRankingRows.map(row => ({ rank: Number(row.rank), racerId: row.racerId, score: Number(row.score), status: row.status })); const x = await api(`/api/organizer/races/${selectedRaceId}/live-ranking`, { method: "PUT", body: JSON.stringify({ rows }) }); toast(`本地实时排名 v${x.ranking.version} 已保存`); await refresh(); };
-$("reviewSubmission").onclick = async () => { await api(`/api/organizer/races/${selectedRaceId}/review`, { method: "POST", body: JSON.stringify({ score: $("scoreInput").value, comment: $("commentInput").value }) }); toast("评审已保存"); await refresh(); };
 $("uploadArchivePoster").onclick = async () => { const x = await uploadPdf(`/api/organizer/races/${selectedRaceId}/archive-poster`, "archivePosterFile"); $("archivePosterResult").textContent = `大小：${x.size} B\nSHA256：${x.sha256}`; toast("最终海报已暂存"); await refresh(); };
 $("uploadCertificate").onclick = async () => { const x = await uploadPdf(`/api/organizer/races/${selectedRaceId}/certificates/racer-001`, "certificateFile"); $("certificateResult").textContent = `证书版本：v${x.certificate.version}\nSHA256：${x.certificate.sha256}`; toast("私人证书已保存至 ARY"); await refresh(); };
-$("publishArchive").onclick = async () => { const showcase = { title: $("showcaseTitle").value, summary: $("showcaseSummary").value, demoUrl: $("showcaseUrl").value }; const x = await api(`/api/organizer/races/${selectedRaceId}/archive`, { method: "POST", body: JSON.stringify({ results: [{ rank: $("resultRank").value, racerId: $("resultRacerId").value, score: $("resultScore").value, award: $("resultAward").value, comment: $("resultComment").value }], showcases: showcase.title || showcase.summary || showcase.demoUrl ? [showcase] : [] }) }); toast(`长期归档 v${x.archive.version} 已发布`); await refresh(); };
-const now = new Date(), endToday = new Date(now); endToday.setHours(23, 59, 0, 0); $("createStartsAt").min = toLocalInput(now); $("createStartsAt").max = toLocalInput(endToday); $("createStartsAt").value = toLocalInput(new Date(now.getTime() + 60000)); $("createEndsAt").min = toLocalInput(new Date(now.getTime() + 120000)); $("createEndsAt").value = toLocalInput(new Date(now.getTime() + 3600000)); $("createStartsAt").onchange = () => { $("createEndsAt").min = toLocalInput(new Date(new Date($("createStartsAt").value).getTime() + 60000)); }; refresh(); setInterval(() => { if (!["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) refresh(); }, 5000);
+$("publishArchive").onclick = async () => {
+  const showcase = { title: $("showcaseTitle").value, summary: $("showcaseSummary").value, demoUrl: $("showcaseUrl").value };
+  const x = await api(`/api/organizer/races/${selectedRaceId}/archive`, { method: "POST", body: JSON.stringify({ results: [{ rank: $("resultRank").value, racerId: $("resultRacerId").value, score: $("resultScore").value, award: $("resultAward").value, comment: $("resultComment").value }], showcases: showcase.title || showcase.summary || showcase.demoUrl ? [showcase] : [] }) });
+  toast(`长期归档 v${x.archive.version} 已发布`);
+  await refresh();
+};
+const now = new Date(), endToday = new Date(now);
+endToday.setHours(23, 59, 0, 0);
+$("createStartsAt").min = toLocalInput(now);
+$("createStartsAt").max = toLocalInput(endToday);
+$("createStartsAt").value = toLocalInput(new Date(now.getTime() + 60000));
+$("createEndsAt").min = toLocalInput(new Date(now.getTime() + 120000));
+$("createEndsAt").value = toLocalInput(new Date(now.getTime() + 3600000));
+$("createStartsAt").onchange = () => { $("createEndsAt").min = toLocalInput(new Date(new Date($("createStartsAt").value).getTime() + 60000)); };
+refresh();
+setInterval(() => { if (!["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) refresh(); }, 5000);

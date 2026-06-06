@@ -6,15 +6,15 @@
 2. Racer 查看开放赛事并参加多个赛事；参加后才能查看完整赛题和提交结果。
 3. 结构化赛题直接保存于 ARY，不提供文件下载。
 4. Racer 结果经 ARY 流式转发至 Organizer；重提覆盖当前结果，ARY 不落盘。
-5. Organizer 按赛事评审并发布公开回顾，Visitor 浏览全部已发布归档。
-6. Organizer 可将本地实时排名公开给 ARY 与 Visitor，ARY 不持久化排名正文。
+5. Organizer 可发布公开回顾，Visitor 浏览全部已发布归档。
+6. Organizer 可将本地分数投影公开给 ARY 与 Visitor，由 ARY 实时计算排名且不持久化排名正文。
 7. 安全证明中心扫描全部赛事，证明 ARY 未保存实时排名正文和提交结果。
 
 赛事使用结构化开始和结束时间。创建赛事时开始时间必须位于服务器当天且不得早于当前时刻，结束时间必须晚于开始时间。服务端按当前时间实时派生状态：
 
 - `scheduled`：未开始，可查看赛事摘要但不能参加或提交。
 - `open`：进行中，可正常参加、查看结构化赛题和提交。
-- `ended`：已终止，可查看已参加赛事及赛题，但不能参加或提交；Organizer 仍可评审、归档或延长结束时间。
+- `ended`：已终止，可查看已参加赛事及赛题，但不能参加或提交；Organizer 仍可归档或延长结束时间。
 
 ## 启动
 
@@ -42,7 +42,7 @@ organizer-storage/
   races/<raceId>/
     submissions/<racerId>.pdf    # Racer 当前提交，仅 Organizer 保存
     manifest.json                # 按赛事披露控制
-    live-ranking.json            # Organizer 本地实时排名正文
+    live-ranking.json            # Organizer 本地分数投影
 
 ary-storage/
   races.json          # 赛事索引
@@ -51,7 +51,7 @@ ary-storage/
   metadata.json       # 按赛事与 Racer 保存最小流程元数据
   audit.json          # 全局审计日志
   archives.json       # 全部公开赛事回顾
-  live-ranking-meta.json # 实时排名版本、哈希和同步状态，不含排名正文
+  live-ranking-meta.json # 实时排名版本、哈希和同步状态，不含分数正文
   public-archive/     # 按赛事保存公开归档资产
 ```
 
@@ -61,9 +61,9 @@ ary-storage/
 2. 在 `4313` Racer 工作台查看赛事列表并分别参加；操作组件仅在参加后出现。
 3. 验证未配置赛题时仍可提交；参加赛事后可查看 ARY 保存的结构化赛题。
 4. 在 Racer 工作台提交并重提 PDF，观察当前结果被覆盖且 ARY 持久化始终为 `0 B`。
-5. 在 Organizer 控制台按赛事评审并发布回顾，在 `4314` 查看归档列表。
+5. 赛事结束后在 Organizer 控制台发布回顾，在 `4314` 查看归档列表。
 6. 在 `4311` ARY 管理端查看赛事总览并执行全部赛事存储扫描。
-7. 在 Organizer 编辑并公开实时排名，观察 `4311` 与 `4314` 无需刷新自动更新。
+7. 将分数 JSON 原子写入 Organizer 本地 `live-ranking.json`，观察 `4311` 与 `4314` 无需刷新自动更新排名。
 
 赛事到达结束时间后无需重启或后台定时任务，下一次页面刷新或 API 请求会立即按 `ended` 状态处理。已结束赛事延长结束时间后可以恢复为 `open`。
 
@@ -72,16 +72,17 @@ ary-storage/
 | 端口 | 角色 | 允许的主要能力 |
 | --- | --- | --- |
 | `4311` | ARY | 查看全部赛事、审计和安全证明，清空 Demo |
-| `4312` | Organizer | 创建赛事，编辑结构化赛题，管理披露、评审与归档 |
+| `4312` | Organizer | 创建赛事，编辑结构化赛题，管理披露与归档 |
 | `4313` | Racer | 查看并参加多个赛事，参加后查看赛题并提交 |
 | `4314` | Visitor | 查看全部公开赛事归档 |
 
 ## 实时排名披露
 
 - 创建赛事或后续编辑披露时，可开启或撤回实时排名公开。
-- Organizer 使用 `PUT /api/organizer/races/:raceId/live-ranking` 原子更新本地 `live-ranking.json`；外部程序也可以按相同结构通过临时文件和原子重命名替换该文件。
-- 排名行字段固定为 `rank`、`racerId`、`score`、`status`，文件还包含 `raceId`、递增 `version` 和 `updatedAt`。
-- ARY 监听 Organizer 文件变化，校验后仅在内存中缓存正文，通过 SSE `/api/live-rankings/events` 推送至 ARY 与 Visitor。
+- Organizer 或本地计分程序直接原子更新 `live-ranking.json`，Demo UI 只展示同步状态和排序结果。
+- 本地文件字段为 `raceId`、递增 `version`、`updatedAt` 和 `scores`；每条分数只包含 `racerId` 与 `score`。
+- ARY 监听 Organizer 文件变化，校验后仅在内存中缓存分数投影并计算排名，通过 SSE `/api/live-rankings/events` 推送至 ARY 与 Visitor。
+- ARY 按 `score` 降序排序，分数相同时按 `racerId` 字典序稳定排序。
 - 只有状态为 `open` 且披露开关开启的赛事会公开实时排名；赛事结束或撤回披露后自动停止展示。
 - 文件无效时继续展示上一有效内存版本并标记为过期；较低版本会被忽略。ARY 仅持久化同步元数据、哈希和审计记录。
 

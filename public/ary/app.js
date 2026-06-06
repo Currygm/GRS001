@@ -6,7 +6,7 @@ function rankingHtml(ranking) {
     <span class="eyebrow">${escapeHtml(ranking.raceId)} · 本地文件 v${ranking.version}${ranking.stale ? " · 同步异常" : ""}</span>
     <h2>${escapeHtml(ranking.title)}</h2>
     <p>更新时间：${formatDateTime(ranking.updatedAt)} · SHA256 ${escapeHtml(ranking.sha256)}</p>
-    ${ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))} · ${escapeHtml(row.status)}</div></div>`).join("")}
+    ${ranking.rows.map(row => `<div class="audit"><span>第 ${row.rank} 名</span><strong>${escapeHtml(row.racerId)}</strong><div>${escapeHtml(String(row.score))}</div></div>`).join("")}
   </article>`;
 }
 
@@ -22,7 +22,7 @@ function render() {
       <h2>${escapeHtml(r.manifest.disclosure.title)}</h2>
       <p>${formatDateTime(r.startsAt)} 至 ${formatDateTime(r.endsAt)} · ${remainingText(r)}</p>
       <p>结构化赛题：${challenge ? `v${challenge.version} · ${escapeHtml(challenge.title)}` : "待配置"} · 参加：${r.participantCount} · 提交：${r.metadata.submissionStatus}</p>
-      <p>实时排名：${ranking ? `本地 v${ranking.version}${ranking.stale ? " · 同步异常" : ""}` : "未配置"} · 披露：${r.manifest.disclosure.liveRankingVisible ? "开启" : "关闭"}</p>
+      <p>实时排名：${ranking ? `分数文件 v${ranking.version}${ranking.stale ? " · 同步异常" : ""}` : "未配置"} · 披露：${r.manifest.disclosure.liveRankingVisible ? "开启" : "关闭"}</p>
       ${challenge ? `<div class="audit"><span>任务描述</span><strong>${escapeHtml(challenge.description)}</strong><div>提交要求：${escapeHtml(challenge.submissionRequirements || "无")} · 评审标准：${escapeHtml(challenge.evaluationCriteria || "未说明")} · 补充说明：${escapeHtml(challenge.notes || "无")}</div></div>` : ""}
       <p>当前长期归档：${current ? `v${current.version}` : "未发布"} · 历史版本：${versions.length} · 私人证书：${r.certificateCount}</p>
       ${versions.map(v => `<div class="audit"><span>v${v.version}</span><strong>${formatDateTime(v.publishedAt)}</strong><div>海报 SHA256 ${v.posterSha256}</div></div>`).join("")}
