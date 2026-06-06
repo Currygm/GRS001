@@ -1,1 +1,31 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Racer 工作台</title><link rel="stylesheet" href="/styles.css"></head><body><header><div class="brand"><div class="mark">RCR</div><div><strong>Racer 工作台</strong><span>选择并参加赛事</span></div></div><div class="status"><i></i> 端口 4313</div></header><main><div class="section-head"><div><span class="eyebrow">OPEN RACES</span><h1>已有赛事</h1></div></div><div id="raceList" class="race-grid"></div><section id="workspace" class="hidden"><div class="section-head"><div><span class="eyebrow">JOINED RACE</span><h1 id="raceTitle"></h1></div></div><div id="raceInfo" class="panel"></div><div class="two-col"><div class="panel"><h2>结构化赛题</h2><div id="challengeDetail"></div></div><div class="panel action-panel"><div class="icon">↑</div><h2>提交比赛结果</h2><label>本地 PDF<input id="submissionFile" type="file" accept="application/pdf,.pdf"></label><button id="uploadSubmission">流式提交 PDF</button><pre id="uploadResult">等待操作</pre></div></div></section><div class="section-head"><div><span class="eyebrow">PRIVATE LONG-TERM ASSETS</span><h1>我的长期证书</h1></div></div><div id="certificateList" class="race-grid"></div></main><div id="toast"></div><script src="/common.js"></script><script src="/racer/app.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Racer 工作台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="mark">RCR</div><div><span>ARY Genesis Race Series</span><strong>Racer 工作台</strong><small>参赛者驾驶舱 · Ride Agents. Build the Future.</small></div></div>
+    <div class="status"><i></i> 端口 4313</div>
+  </header>
+  <main>
+    <div class="section-head"><div><span class="eyebrow">OPEN RACES</span><h1>已有赛事</h1></div></div>
+    <div id="raceList" class="race-grid"></div>
+    <section id="workspace" class="hidden">
+      <div class="section-head"><div><span class="eyebrow">JOINED RACE</span><h1 id="raceTitle"></h1></div></div>
+      <div id="raceInfo" class="panel"></div>
+      <div class="two-col">
+        <div class="panel"><h2>结构化赛题</h2><div id="challengeDetail"></div></div>
+        <div class="panel action-panel"><div class="icon">↑</div><h2>提交比赛结果</h2><label>本地 PDF<input id="submissionFile" type="file" accept="application/pdf,.pdf"></label><button id="uploadSubmission">流式提交 PDF</button><pre id="uploadResult">等待操作</pre></div>
+      </div>
+    </section>
+    <div class="section-head"><div><span class="eyebrow">PRIVATE LONG-TERM ASSETS</span><h1>我的长期证书</h1></div></div>
+    <div id="certificateList" class="race-grid"></div>
+  </main>
+  <div id="toast"></div>
+  <script src="/common.js"></script><script src="/racer/app.js"></script>
+</body>
+</html>
